@@ -27,3 +27,8 @@ envoy_cc_library(
     hdrs = ["stats_macros.h"],
     deps = [":stats_interface"],
 )
+
+envoy_cc_library(
+    name = "hystrix_stats",
+    hdrs = ["hystrix_stats.h"],
+)

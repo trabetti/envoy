@@ -116,6 +116,11 @@ private:
                       const Upstream::Outlier::Detector* outlier_detector,
                       Buffer::Instance& response);
   std::string statsAsJson(const std::map<std::string, uint64_t>& all_stats);
+  std::string BuildEventStream(const std::map<std::string, std::string>& all_stats);
+  std::string getOutlierSuccessRateRequestVolume(const Upstream::Outlier::Detector* outlier_detector);
+  std::string getOutlierBaseEjectionTimeMs(const Upstream::Outlier::Detector* outlier_detector);
+  //void addInfoToStream(std::string key, std::string value, Buffer::Instance& response);
+  void addInfoToStream(std::string key, std::string value, std::stringstream& info);
 
   /**
    * URL handlers.
@@ -130,6 +135,7 @@ private:
   Http::Code handlerResetCounters(const std::string& url, Buffer::Instance& response);
   Http::Code handlerServerInfo(const std::string& url, Buffer::Instance& response);
   Http::Code handlerStats(const std::string& url, Buffer::Instance& response);
+  Http::Code handlerHystrixEventStream(const std::string& url, Buffer::Instance& response);
   Http::Code handlerQuitQuitQuit(const std::string& url, Buffer::Instance& response);
   Http::Code handlerListenerInfo(const std::string& url, Buffer::Instance& response);
 

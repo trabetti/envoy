@@ -20,6 +20,9 @@
 #include "envoy/thread_local/thread_local.h"
 #include "envoy/tracing/http_tracer.h"
 #include "envoy/upstream/cluster_manager.h"
+#include "envoy/stats/hystrix_stats.h"
+
+
 
 namespace Envoy {
 namespace Server {
@@ -179,6 +182,13 @@ public:
    * @return information about the local environment the server is running in.
    */
   virtual const LocalInfo::LocalInfo& localInfo() PURE;
+
+  // start Hystrix Timer
+  virtual void setHystrixStreamTimer(const std::chrono::milliseconds& d) PURE;
+
+
+  virtual Stats::HystrixStats& hystrixStats() PURE;
+
 };
 
 } // namespace Server

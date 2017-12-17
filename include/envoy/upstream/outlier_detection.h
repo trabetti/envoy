@@ -99,6 +99,11 @@ public:
    *         proceed with success rate based outlier ejection.
    */
   virtual double successRateEjectionThreshold() const PURE;
+
+  virtual uint64_t successRateRequestVolume() const PURE;
+  virtual uint64_t baseEjectionTimeMs() const PURE;
+
+
 };
 
 typedef std::shared_ptr<Detector> DetectorSharedPtr;

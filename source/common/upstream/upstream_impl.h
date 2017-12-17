@@ -134,6 +134,7 @@ public:
   }
 
   // Upstream::Host
+  Stats::Counter& counter(const std::string& name) { return stats_store_.counter(name); }
   std::list<Stats::CounterSharedPtr> counters() const override { return stats_store_.counters(); }
   CreateConnectionData createConnection(Event::Dispatcher& dispatcher) const override;
   std::list<Stats::GaugeSharedPtr> gauges() const override { return stats_store_.gauges(); }

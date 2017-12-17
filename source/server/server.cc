@@ -6,6 +6,8 @@
 #include <functional>
 #include <string>
 #include <unordered_set>
+#include <iomanip>
+
 
 #include "envoy/event/dispatcher.h"
 #include "envoy/event/signal.h"
@@ -148,6 +150,17 @@ void InstanceImpl::getParentStats(HotRestart::GetParentStatsInfo& info) {
   info.num_connections_ = numConnections();
 }
 
+void InstanceImpl::sendHystrixMessage() {
+    auto t = std::time(nullptr);
+    auto tm = *std::localtime(&t);
+	std::cout << "Hystrix timer: " <<  std::put_time(&tm, "%d-%m-%Y %H-%M-%S") << std::endl;
+}
+
+void InstanceImpl::setHystrixStreamTimer(const std::chrono::milliseconds& d){
+	std::cout << "starting timer" << std::endl;
+	stat_flush_timer_->enableTimer(d);
+}
+
 bool InstanceImpl::healthCheckFailed() { return server_stats_->live_.value() == 0; }
 
 void InstanceImpl::initialize(Options& options,
@@ -245,10 +258,15 @@ void InstanceImpl::initialize(Options& options,
   stat_flush_timer_ = dispatcher_->createTimer([this]() -> void { flushStats(); });
   stat_flush_timer_->enableTimer(config_->statsFlushInterval());
 
+  std::cout << "creating timer" << std::endl;
+  hystrix_stream_timer_ = dispatcher_->createTimer([this]() -> void { sendHystrixMessage(); });
+
   // GuardDog (deadlock detection) object and thread setup before workers are
   // started and before our own run() loop runs.
   guard_dog_.reset(
       new Server::GuardDogImpl(stats_store_, *config_, ProdMonotonicTimeSource::instance_));
+
+  hystrix_stats_.reset(new Stats::HystrixStatsImpl(10));
 }
 
 void InstanceImpl::startWorkers() {

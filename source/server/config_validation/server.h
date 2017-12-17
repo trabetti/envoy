@@ -109,6 +109,11 @@ public:
     // validation mock.
     return nullptr;
   }
+  void setHystrixStreamTimer(const std::chrono::milliseconds& d) override {
+	std::cout << std::to_string(d.count()) << std::endl;
+  }
+  Stats::HystrixStats& hystrixStats() override { return hystrix_stats_; }
+
 
 private:
   void initialize(Options& options, Network::Address::InstanceConstSharedPtr local_address,
@@ -132,6 +137,7 @@ private:
   std::unique_ptr<Upstream::ValidationClusterManagerFactory> cluster_manager_factory_;
   InitManagerImpl init_manager_;
   ListenerManagerImpl listener_manager_;
+  Stats::HystrixStatsImpl hystrix_stats_;
 };
 
 } // namespace Server
