@@ -7,11 +7,12 @@
 #include <string>
 
 #include "envoy/common/optional.h"
+#include "envoy/event/dispatcher.h"
 #include "envoy/network/connection.h"
+#include "envoy/network/transport_socket.h"
 
 #include "common/buffer/watermark_buffer.h"
 #include "common/common/logger.h"
-#include "common/event/dispatcher_impl.h"
 #include "common/event/libevent.h"
 #include "common/network/filter_manager_impl.h"
 
@@ -42,13 +43,21 @@ public:
  */
 class ConnectionImpl : public virtual Connection,
                        public BufferSource,
+                       public TransportSocketCallbacks,
                        protected Logger::Loggable<Logger::Id::connection> {
 public:
-  ConnectionImpl(Event::DispatcherImpl& dispatcher, int fd,
+  // TODO(lizan): Remove the old style constructor when factory is ready.
+  ConnectionImpl(Event::Dispatcher& dispatcher, int fd,
                  Address::InstanceConstSharedPtr remote_address,
                  Address::InstanceConstSharedPtr local_address,
                  Address::InstanceConstSharedPtr bind_to_address, bool using_original_dst,
                  bool connected);
+
+  ConnectionImpl(Event::Dispatcher& dispatcher, int fd,
+                 Address::InstanceConstSharedPtr remote_address,
+                 Address::InstanceConstSharedPtr local_address,
+                 Address::InstanceConstSharedPtr bind_to_address,
+                 TransportSocketPtr&& transport_socket, bool using_original_dst, bool connected);
 
   ~ConnectionImpl();
 
@@ -60,16 +69,17 @@ public:
 
   // Network::Connection
   void addConnectionCallbacks(ConnectionCallbacks& cb) override;
+  void addBytesSentCallback(BytesSentCb cb) override;
   void close(ConnectionCloseType type) override;
   Event::Dispatcher& dispatcher() override;
   uint64_t id() const override;
-  std::string nextProtocol() const override { return ""; }
+  std::string nextProtocol() const override { return transport_socket_->protocol(); }
   void noDelay(bool enable) override;
   void readDisable(bool disable) override;
   void detectEarlyCloseWhenReadDisabled(bool value) override { detect_early_close_ = value; }
   bool readEnabled() const override;
-  const Address::Instance& remoteAddress() const override { return *remote_address_; }
-  const Address::Instance& localAddress() const override { return *local_address_; }
+  const Address::InstanceConstSharedPtr& remoteAddress() const override { return remote_address_; }
+  const Address::InstanceConstSharedPtr& localAddress() const override { return local_address_; }
   void setConnectionStats(const ConnectionStats& stats) override;
   Ssl::Connection* ssl() override { return nullptr; }
   const Ssl::Connection* ssl() const override { return nullptr; }
@@ -84,19 +94,12 @@ public:
   Buffer::Instance& getReadBuffer() override { return read_buffer_; }
   Buffer::Instance& getWriteBuffer() override { return *current_write_buffer_; }
 
-protected:
-  enum class PostIoAction { Close, KeepOpen };
-
-  struct IoResult {
-    PostIoAction action_;
-    uint64_t bytes_processed_;
-  };
-
-  virtual void closeSocket(ConnectionEvent close_type);
-  void doConnect();
-  void raiseEvent(ConnectionEvent event);
+  // Network::TransportSocketCallbacks
+  int fd() override { return fd_; }
+  Connection& connection() override { return *this; }
+  void raiseEvent(ConnectionEvent event) override;
   // Should the read buffer be drained?
-  bool shouldDrainReadBuffer() {
+  bool shouldDrainReadBuffer() override {
     return read_buffer_limit_ > 0 && read_buffer_.length() >= read_buffer_limit_;
   }
   // Mark read buffer ready to read in the event loop. This is used when yielding following
@@ -104,7 +107,11 @@ protected:
   // TODO(htuch): While this is the basis for also yielding to other connections to provide some
   // fair sharing of CPU resources, the underlying event loop does not make any fairness guarantees.
   // Reconsider how to make fairness happen.
-  void setReadBufferReady() { file_event_->activate(Event::FileReadyType::Read); }
+  void setReadBufferReady() override { file_event_->activate(Event::FileReadyType::Read); }
+
+protected:
+  void closeSocket(ConnectionEvent close_type);
+  void doConnect();
 
   void onLowWatermark();
   void onHighWatermark();
@@ -117,6 +124,7 @@ protected:
   // a generic pointer.
   Buffer::InstancePtr write_buffer_;
   uint32_t read_buffer_limit_ = 0;
+  TransportSocketPtr transport_socket_;
 
 private:
   // clang-format off
@@ -129,9 +137,6 @@ private:
   };
   // clang-format on
 
-  virtual IoResult doReadFromSocket();
-  virtual IoResult doWriteToSocket();
-  virtual void onConnected();
   void onFileEvent(uint32_t events);
   void onRead(uint64_t read_buffer_size);
   void onReadReady();
@@ -141,17 +146,18 @@ private:
 
   static std::atomic<uint64_t> next_global_id_;
 
-  Event::DispatcherImpl& dispatcher_;
+  Event::Dispatcher& dispatcher_;
   int fd_{-1};
   Event::FileEventPtr file_event_;
   const uint64_t id_;
   std::list<ConnectionCallbacks*> callbacks_;
+  std::list<BytesSentCb> bytes_sent_callbacks_;
   uint32_t state_{InternalState::ReadEnabled};
   Buffer::Instance* current_write_buffer_{};
   uint64_t last_read_buffer_size_{};
   uint64_t last_write_buffer_size_{};
   std::unique_ptr<ConnectionStats> connection_stats_;
-  // Tracks the number of times reads have been disabled.  If N different components call
+  // Tracks the number of times reads have been disabled. If N different components call
   // readDisabled(true) this allows the connection to only resume reads when readDisabled(false)
   // has been called N times.
   uint32_t read_disable_count_{0};
@@ -165,9 +171,9 @@ private:
  */
 class ClientConnectionImpl : public ConnectionImpl, virtual public ClientConnection {
 public:
-  ClientConnectionImpl(Event::DispatcherImpl& dispatcher,
-                       Address::InstanceConstSharedPtr remote_address,
-                       const Address::InstanceConstSharedPtr source_address);
+  ClientConnectionImpl(Event::Dispatcher& dispatcher,
+                       const Address::InstanceConstSharedPtr& remote_address,
+                       const Address::InstanceConstSharedPtr& source_address);
 
   // Network::ClientConnection
   void connect() override { doConnect(); }

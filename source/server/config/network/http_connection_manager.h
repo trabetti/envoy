@@ -26,16 +26,21 @@ class HttpConnectionManagerFilterConfigFactory : Logger::Loggable<Logger::Id::co
                                                  public NamedNetworkFilterConfigFactory {
 public:
   // NamedNetworkFilterConfigFactory
-  NetworkFilterFactoryCb createFilterFactory(const Json::Object& config,
+  NetworkFilterFactoryCb createFilterFactory(const Json::Object& json_config,
                                              FactoryContext& context) override;
-  NetworkFilterFactoryCb createFilterFactoryFromProto(const Protobuf::Message& config,
+  NetworkFilterFactoryCb createFilterFactoryFromProto(const Protobuf::Message& proto_config,
                                                       FactoryContext& context) override;
 
   ProtobufTypes::MessagePtr createEmptyConfigProto() override {
-    return std::unique_ptr<envoy::api::v2::filter::http::HttpConnectionManager>(
-        new envoy::api::v2::filter::http::HttpConnectionManager());
+    return std::unique_ptr<envoy::api::v2::filter::network::HttpConnectionManager>(
+        new envoy::api::v2::filter::network::HttpConnectionManager());
   }
   std::string name() override { return Config::NetworkFilterNames::get().HTTP_CONNECTION_MANAGER; }
+
+private:
+  NetworkFilterFactoryCb
+  createFilter(const envoy::api::v2::filter::network::HttpConnectionManager& proto_config,
+               FactoryContext& context);
 };
 
 /**
@@ -59,7 +64,7 @@ class HttpConnectionManagerConfig : Logger::Loggable<Logger::Id::config>,
                                     public Http::FilterChainFactory,
                                     public Http::ConnectionManagerConfig {
 public:
-  HttpConnectionManagerConfig(const envoy::api::v2::filter::http::HttpConnectionManager& config,
+  HttpConnectionManagerConfig(const envoy::api::v2::filter::network::HttpConnectionManager& config,
                               FactoryContext& context, Http::DateProvider& date_provider,
                               Router::RouteConfigProviderManager& route_config_provider_manager);
 
@@ -67,9 +72,7 @@ public:
   void createFilterChain(Http::FilterChainFactoryCallbacks& callbacks) override;
 
   // Http::ConnectionManagerConfig
-  const std::list<Http::AccessLog::InstanceSharedPtr>& accessLogs() override {
-    return access_logs_;
-  }
+  const std::list<AccessLog::InstanceSharedPtr>& accessLogs() override { return access_logs_; }
   Http::ServerConnectionPtr createCodec(Network::Connection& connection,
                                         const Buffer::Instance& data,
                                         Http::ServerConnectionCallbacks& callbacks) override;
@@ -101,7 +104,7 @@ private:
 
   FactoryContext& context_;
   std::list<HttpFilterFactoryCb> filter_factories_;
-  std::list<Http::AccessLog::InstanceSharedPtr> access_logs_;
+  std::list<AccessLog::InstanceSharedPtr> access_logs_;
   const std::string stats_prefix_;
   Http::ConnectionManagerStats stats_;
   Http::ConnectionManagerTracingStats tracing_stats_;

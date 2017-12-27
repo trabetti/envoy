@@ -77,23 +77,42 @@ private:
  */
 class ClusterManagerInitHelper : Logger::Loggable<Logger::Id::upstream> {
 public:
+  /**
+   * @param per_cluster_init_callback supplies the callback to call when a cluster has itself
+   *        initialized. The cluster manager can use this for post-init processing.
+   */
+  ClusterManagerInitHelper(const std::function<void(Cluster&)>& per_cluster_init_callback)
+      : per_cluster_init_callback_(per_cluster_init_callback) {}
+
+  enum class State {
+    // Initial state. During this state all static clusters are loaded. Any phase 1 clusters
+    // are immediately initialized.
+    Loading,
+    // During this state we wait for all static clusters to fully initialize. This requires
+    // completing phase 1 clusters, initializing phase 2 clusters, and then waiting for them.
+    WaitingForStaticInitialize,
+    // If CDS is configured, this state tracks waiting for the first CDS response to populate
+    // clusters.
+    WaitingForCdsInitialize,
+    // During this state, all CDS populated clusters are undergoing either phase 1 or phase 2
+    // initialization.
+    CdsInitialized,
+    // All clusters are fully initialized.
+    AllClustersInitialized
+  };
+
   void addCluster(Cluster& cluster);
   void onStaticLoadComplete();
   void removeCluster(Cluster& cluster);
   void setCds(CdsApi* cds);
   void setInitializedCb(std::function<void()> callback);
+  State state() const { return state_; }
 
 private:
-  enum class State {
-    Loading,
-    WaitingForStaticInitialize,
-    WaitingForCdsInitialize,
-    CdsInitialized,
-    AllClustersInitialized
-  };
-
   void maybeFinishInitialize();
+  void onClusterInit(Cluster& cluster);
 
+  std::function<void(Cluster& cluster)> per_cluster_init_callback_;
   CdsApi* cds_{};
   std::function<void()> initialized_callback_;
   std::list<Cluster*> primary_init_clusters_;
@@ -164,6 +183,9 @@ public:
 
   Config::GrpcMux& adsMux() override { return *ads_mux_; }
 
+  const std::string versionInfo() const override;
+  const std::string& localClusterName() const override { return local_cluster_name_; }
+
 private:
   /**
    * Thread local cached cluster data. Each thread local cluster gets updates from the parent
@@ -179,19 +201,25 @@ private:
     };
 
     struct ClusterEntry : public ThreadLocalCluster {
-      ClusterEntry(ThreadLocalClusterManagerImpl& parent, ClusterInfoConstSharedPtr cluster);
+      ClusterEntry(ThreadLocalClusterManagerImpl& parent, ClusterInfoConstSharedPtr cluster,
+                   const LoadBalancerFactorySharedPtr& lb_factory);
       ~ClusterEntry();
 
       Http::ConnectionPool::Instance* connPool(ResourcePriority priority,
                                                LoadBalancerContext* context);
 
       // Upstream::ThreadLocalCluster
-      const HostSet& hostSet() override { return host_set_; }
+      const PrioritySet& prioritySet() override { return priority_set_; }
       ClusterInfoConstSharedPtr info() override { return cluster_info_; }
       LoadBalancer& loadBalancer() override { return *lb_; }
 
       ThreadLocalClusterManagerImpl& parent_;
-      HostSetImpl host_set_;
+      PrioritySetImpl priority_set_;
+      // LB factory if applicable. Not all load balancer types have a factory. LB types that have
+      // a factory will create a new LB on every membership update. LB types that don't have a
+      // factory will create an LB on construction and use it forever.
+      LoadBalancerFactorySharedPtr lb_factory_;
+      // Current active LB.
       LoadBalancerPtr lb_;
       ClusterInfoConstSharedPtr cluster_info_;
       Http::AsyncClientImpl http_async_client_;
@@ -204,36 +232,49 @@ private:
     ~ThreadLocalClusterManagerImpl();
     void drainConnPools(const std::vector<HostSharedPtr>& hosts);
     void drainConnPools(HostSharedPtr old_host, ConnPoolsContainer& container);
-    static void updateClusterMembership(const std::string& name, HostVectorConstSharedPtr hosts,
+    static void updateClusterMembership(const std::string& name, uint32_t priority,
+                                        HostVectorConstSharedPtr hosts,
                                         HostVectorConstSharedPtr healthy_hosts,
                                         HostListsConstSharedPtr hosts_per_locality,
                                         HostListsConstSharedPtr healthy_hosts_per_locality,
                                         const std::vector<HostSharedPtr>& hosts_added,
                                         const std::vector<HostSharedPtr>& hosts_removed,
                                         ThreadLocal::Slot& tls);
+    static void onHostHealthFailure(const HostSharedPtr& host, ThreadLocal::Slot& tls);
 
     ClusterManagerImpl& parent_;
     Event::Dispatcher& thread_local_dispatcher_;
     std::unordered_map<std::string, ClusterEntryPtr> thread_local_clusters_;
     std::unordered_map<HostConstSharedPtr, ConnPoolsContainer> host_http_conn_pool_map_;
-    const HostSet* local_host_set_{};
+    const PrioritySet* local_priority_set_{};
   };
 
   struct PrimaryClusterData {
     PrimaryClusterData(uint64_t config_hash, bool added_via_api, ClusterSharedPtr&& cluster)
         : config_hash_(config_hash), added_via_api_(added_via_api), cluster_(std::move(cluster)) {}
 
+    LoadBalancerFactorySharedPtr loadBalancerFactory() {
+      if (thread_aware_lb_ != nullptr) {
+        return thread_aware_lb_->factory();
+      } else {
+        return nullptr;
+      }
+    }
+
     const uint64_t config_hash_;
     const bool added_via_api_;
     ClusterSharedPtr cluster_;
+    // Optional thread aware LB depending on the LB type. Not all clusters have one.
+    ThreadAwareLoadBalancerPtr thread_aware_lb_;
   };
 
   static ClusterManagerStats generateStats(Stats::Scope& scope);
   void loadCluster(const envoy::api::v2::Cluster& cluster, bool added_via_api);
-  void postInitializeCluster(Cluster& cluster);
-  void postThreadLocalClusterUpdate(const Cluster& primary_cluster,
+  void onClusterInit(Cluster& cluster);
+  void postThreadLocalClusterUpdate(const Cluster& cluster, uint32_t priority,
                                     const std::vector<HostSharedPtr>& hosts_added,
                                     const std::vector<HostSharedPtr>& hosts_removed);
+  void postThreadLocalHealthFailure(const HostSharedPtr& host);
 
   ClusterManagerFactory& factory_;
   Runtime::Loader& runtime_;
@@ -250,6 +291,8 @@ private:
   ClusterManagerInitHelper init_helper_;
   Config::GrpcMuxPtr ads_mux_;
   LoadStatsReporterPtr load_stats_reporter_;
+  // The name of the local cluster of this Envoy instance if defined, else the empty string.
+  std::string local_cluster_name_;
 };
 
 } // namespace Upstream

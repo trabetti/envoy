@@ -74,12 +74,11 @@ template <class T> static void initializeMockStreamFilterCallbacks(T& callbacks)
   ON_CALL(callbacks, dispatcher()).WillByDefault(ReturnRef(callbacks.dispatcher_));
   ON_CALL(callbacks, requestInfo()).WillByDefault(ReturnRef(callbacks.request_info_));
   ON_CALL(callbacks, route()).WillByDefault(Return(callbacks.route_));
-  ON_CALL(callbacks, downstreamAddress()).WillByDefault(ReturnRef(callbacks.downstream_address_));
 }
 
 MockStreamDecoderFilterCallbacks::MockStreamDecoderFilterCallbacks() {
   initializeMockStreamFilterCallbacks(*this);
-  ON_CALL(*this, decodingBuffer()).WillByDefault(Return(buffer_.get()));
+  ON_CALL(*this, decodingBuffer()).WillByDefault(Invoke(&buffer_, &Buffer::InstancePtr::get));
 
   ON_CALL(*this, addDownstreamWatermarkCallbacks(_))
       .WillByDefault(Invoke([this](DownstreamWatermarkCallbacks& callbacks) -> void {
@@ -92,14 +91,16 @@ MockStreamDecoderFilterCallbacks::MockStreamDecoderFilterCallbacks() {
       }));
 
   ON_CALL(*this, activeSpan()).WillByDefault(ReturnRef(active_span_));
+  ON_CALL(*this, tracingConfig()).WillByDefault(ReturnRef(tracing_config_));
 }
 
 MockStreamDecoderFilterCallbacks::~MockStreamDecoderFilterCallbacks() {}
 
 MockStreamEncoderFilterCallbacks::MockStreamEncoderFilterCallbacks() {
   initializeMockStreamFilterCallbacks(*this);
-  ON_CALL(*this, encodingBuffer()).WillByDefault(Return(buffer_.get()));
+  ON_CALL(*this, encodingBuffer()).WillByDefault(Invoke(&buffer_, &Buffer::InstancePtr::get));
   ON_CALL(*this, activeSpan()).WillByDefault(ReturnRef(active_span_));
+  ON_CALL(*this, tracingConfig()).WillByDefault(ReturnRef(tracing_config_));
 }
 
 MockStreamEncoderFilterCallbacks::~MockStreamEncoderFilterCallbacks() {}
@@ -165,23 +166,5 @@ MockInstance::MockInstance() {}
 MockInstance::~MockInstance() {}
 
 } // namespace ConnectionPool
-} // namespace Http
-
-namespace Http {
-namespace AccessLog {
-
-MockInstance::MockInstance() {}
-MockInstance::~MockInstance() {}
-
-MockRequestInfo::MockRequestInfo() {
-  ON_CALL(*this, upstreamHost()).WillByDefault(Return(host_));
-  ON_CALL(*this, startTime()).WillByDefault(Return(start_time_));
-  ON_CALL(*this, requestReceivedDuration()).WillByDefault(Return(request_received_duration_));
-  ON_CALL(*this, responseReceivedDuration()).WillByDefault(Return(response_received_duration_));
-}
-
-MockRequestInfo::~MockRequestInfo() {}
-
-} // namespace AccessLog
 } // namespace Http
 } // namespace Envoy

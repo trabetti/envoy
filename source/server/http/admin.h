@@ -33,7 +33,7 @@ class AdminImpl : public Admin,
 public:
   AdminImpl(const std::string& access_log_path, const std::string& profiler_path,
             const std::string& address_out_path, Network::Address::InstanceConstSharedPtr address,
-            Server::Instance& server);
+            Server::Instance& server, Stats::Scope& listener_scope);
 
   Http::Code runCallback(const std::string& path, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
   const Network::ListenSocket& socket() override { return *socket_; }
@@ -51,9 +51,7 @@ public:
   void createFilterChain(Http::FilterChainFactoryCallbacks& callbacks) override;
 
   // Http::ConnectionManagerConfig
-  const std::list<Http::AccessLog::InstanceSharedPtr>& accessLogs() override {
-    return access_logs_;
-  }
+  const std::list<AccessLog::InstanceSharedPtr>& accessLogs() override { return access_logs_; }
   Http::ServerConnectionPtr createCodec(Network::Connection& connection,
                                         const Buffer::Instance& data,
                                         Http::ServerConnectionCallbacks& callbacks) override;
@@ -117,6 +115,13 @@ private:
                       const Upstream::Outlier::Detector* outlier_detector,
                       Buffer::Instance& response);
   std::string statsAsJson(const std::map<std::string, uint64_t>& all_stats);
+  static void statsAsPrometheus(const std::list<Stats::CounterSharedPtr>& counters,
+                                const std::list<Stats::GaugeSharedPtr>& gauges,
+                                Buffer::Instance& response);
+  static std::string sanitizePrometheusName(const std::string& name);
+  static std::string formatTagsForPrometheus(const std::vector<Stats::Tag>& tags);
+  static std::string prometheusMetricName(const std::string& extractedName);
+
   std::string BuildEventStream(const std::map<std::string, std::string>& all_stats);
   std::string getOutlierSuccessRateRequestVolume(const Upstream::Outlier::Detector* outlier_detector);
   std::string getOutlierBaseEjectionTimeMs(const Upstream::Outlier::Detector* outlier_detector);
@@ -124,6 +129,7 @@ private:
   void addInfoToStream(std::string key, std::string value, std::stringstream& info);
   void addHystrixThreadPool(Buffer::Instance& response);
   void addHystrixCommand(Stats::HystrixStats& stats, Buffer::Instance& response);
+
   /**
    * URL handlers.
    */
@@ -142,7 +148,7 @@ private:
   Http::Code handlerListenerInfo(const std::string& url, Buffer::Instance& response);
 
   Server::Instance& server_;
-  std::list<Http::AccessLog::InstanceSharedPtr> access_logs_;
+  std::list<AccessLog::InstanceSharedPtr> access_logs_;
   const std::string profile_path_;
   Network::ListenSocketPtr socket_;
   Http::ConnectionManagerStats stats_;

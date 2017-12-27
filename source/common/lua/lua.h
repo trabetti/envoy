@@ -11,7 +11,7 @@
 #include "common/common/c_smart_ptr.h"
 #include "common/common/logger.h"
 
-#include "lua.hpp"
+#include "luajit-2.0/lua.hpp"
 
 namespace Envoy {
 namespace Lua {
@@ -235,7 +235,7 @@ public:
    */
   void reset() {
     unref();
-    object_ = {};
+    object_ = std::pair<T*, lua_State*>{};
     ref_ = LUA_NOREF;
   }
 
@@ -279,6 +279,16 @@ public:
     if (this->object_.first) {
       this->object_.first->markLive();
     }
+  }
+
+  void reset(const std::pair<T*, lua_State*>& object, bool leave_on_stack) {
+    markDead();
+    LuaRef<T>::reset(object, leave_on_stack);
+  }
+
+  void reset() {
+    markDead();
+    LuaRef<T>::reset();
   }
 };
 

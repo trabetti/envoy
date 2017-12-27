@@ -20,21 +20,27 @@ public:
   ~MockContextManager();
 
   ClientContextPtr createSslClientContext(Stats::Scope& scope,
-                                          ClientContextConfig& config) override {
+                                          const ClientContextConfig& config) override {
     return ClientContextPtr{createSslClientContext_(scope, config)};
   }
 
-  ServerContextPtr createSslServerContext(Stats::Scope& scope,
-                                          ServerContextConfig& config) override {
-    return ServerContextPtr{createSslServerContext_(scope, config)};
+  ServerContextPtr createSslServerContext(const std::string& listener_name,
+                                          const std::vector<std::string>& server_names,
+                                          Stats::Scope& scope, const ServerContextConfig& config,
+                                          bool skip_context_update) override {
+    return ServerContextPtr{
+        createSslServerContext_(listener_name, server_names, scope, config, skip_context_update)};
   }
 
   MOCK_METHOD2(createSslClientContext_,
-               ClientContext*(Stats::Scope& scope, ClientContextConfig& config));
-  MOCK_METHOD2(createSslServerContext_,
-               ServerContext*(Stats::Scope& stats, ServerContextConfig& config));
-  MOCK_METHOD0(daysUntilFirstCertExpires, size_t());
-  MOCK_METHOD1(iterateContexts, void(std::function<void(Context&)> callback));
+               ClientContext*(Stats::Scope& scope, const ClientContextConfig& config));
+  MOCK_METHOD5(createSslServerContext_,
+               ServerContext*(const std::string& listener_name,
+                              const std::vector<std::string>& server_names, Stats::Scope& stats,
+                              const ServerContextConfig& config, bool skip_context_update));
+  MOCK_CONST_METHOD2(findSslServerContext, ServerContext*(const std::string&, const std::string&));
+  MOCK_CONST_METHOD0(daysUntilFirstCertExpires, size_t());
+  MOCK_METHOD1(iterateContexts, void(std::function<void(const Context&)> callback));
 };
 
 class MockConnection : public Connection {
@@ -54,9 +60,9 @@ public:
   MockClientContext();
   ~MockClientContext();
 
-  MOCK_METHOD0(daysUntilFirstCertExpires, size_t());
-  MOCK_METHOD0(getCaCertInformation, std::string());
-  MOCK_METHOD0(getCertChainInformation, std::string());
+  MOCK_CONST_METHOD0(daysUntilFirstCertExpires, size_t());
+  MOCK_CONST_METHOD0(getCaCertInformation, std::string());
+  MOCK_CONST_METHOD0(getCertChainInformation, std::string());
 };
 
 } // namespace Ssl

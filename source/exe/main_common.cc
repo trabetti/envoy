@@ -15,7 +15,6 @@
 #include "server/test_hooks.h"
 
 #ifdef ENVOY_HOT_RESTART
-#include "common/api/os_sys_calls_impl.h"
 #include "server/hot_restart_impl.h"
 #endif
 
@@ -28,7 +27,11 @@ class ProdComponentFactory : public ComponentFactory {
 public:
   // Server::DrainManagerFactory
   DrainManagerPtr createDrainManager(Instance& server) override {
-    return DrainManagerPtr{new DrainManagerImpl(server)};
+    return DrainManagerPtr{
+        // The global drain manager only triggers on listener modification, which effectively is
+        // hot restart at the global level. The per-listener drain managers decide whether to
+        // to include /healthcheck/fail status.
+        new DrainManagerImpl(server, envoy::api::v2::Listener_DrainType_MODIFY_ONLY)};
   }
 
   Runtime::LoaderPtr createRuntime(Server::Instance& server,
@@ -43,10 +46,9 @@ int main_common(OptionsImpl& options) {
   Stats::RawStatData::configure(options);
 
 #ifdef ENVOY_HOT_RESTART
-  Api::OsSysCallsImpl os_sys_calls_impl;
   std::unique_ptr<Server::HotRestartImpl> restarter;
   try {
-    restarter.reset(new Server::HotRestartImpl(options, os_sys_calls_impl));
+    restarter.reset(new Server::HotRestartImpl(options));
   } catch (Envoy::EnvoyException& e) {
     std::cerr << "unable to initialize hot restart: " << e.what() << std::endl;
     return 1;
@@ -81,9 +83,14 @@ int main_common(OptionsImpl& options) {
   DefaultTestHooks default_test_hooks;
   ThreadLocal::InstanceImpl tls;
   Stats::ThreadLocalStoreImpl stats_store(stats_allocator);
-  Server::InstanceImpl server(options, local_address, default_test_hooks, *restarter, stats_store,
-                              access_log_lock, component_factory, tls);
-  server.run();
+  try {
+    Server::InstanceImpl server(options, local_address, default_test_hooks, *restarter, stats_store,
+                                access_log_lock, component_factory, tls);
+    server.run();
+  } catch (const EnvoyException& e) {
+    ares_library_cleanup();
+    return 1;
+  }
   ares_library_cleanup();
   return 0;
 }

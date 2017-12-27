@@ -27,6 +27,53 @@ struct Decision {
   bool is_tracing;
 };
 
+/**
+ * Tracing tag names.
+ */
+class TracingTagValues {
+public:
+  // OpenTracing standard tag names.
+  const std::string COMPONENT = "component";
+  const std::string DB_INSTANCE = "db.instance";
+  const std::string DB_STATEMENT = "db.statement";
+  const std::string DB_USER = "db.user";
+  const std::string DB_TYPE = "db.type";
+  const std::string ERROR = "error";
+  const std::string HTTP_METHOD = "http.method";
+  const std::string HTTP_STATUS_CODE = "http.status_code";
+  const std::string HTTP_URL = "http.url";
+  const std::string MESSAGE_BUS_DESTINATION = "message_bus.destination";
+  const std::string PEER_ADDRESS = "peer.address";
+  const std::string PEER_HOSTNAME = "peer.hostname";
+  const std::string PEER_IPV4 = "peer.ipv4";
+  const std::string PEER_IPV6 = "peer.ipv6";
+  const std::string PEER_PORT = "peer.port";
+  const std::string PEER_SERVICE = "peer.service";
+  const std::string SPAN_KIND = "span.kind";
+
+  // Non-standard tag names.
+  const std::string DOWNSTREAM_CLUSTER = "downstream_cluster";
+  const std::string GRPC_STATUS_CODE = "grpc.status_code";
+  const std::string GUID_X_CLIENT_TRACE_ID = "guid:x-client-trace-id";
+  const std::string GUID_X_REQUEST_ID = "guid:x-request-id";
+  const std::string HTTP_PROTOCOL = "http.protocol";
+  const std::string NODE_ID = "node_id";
+  const std::string REQUEST_SIZE = "request_size";
+  const std::string RESPONSE_FLAGS = "response_flags";
+  const std::string RESPONSE_SIZE = "response_size";
+  const std::string STATUS = "status";
+  const std::string UPSTREAM_CLUSTER = "upstream_cluster";
+  const std::string USER_AGENT = "user_agent";
+  const std::string ZONE = "zone";
+
+  // Tag values.
+  const std::string CANCELED = "canceled";
+  const std::string PROXY = "proxy";
+  const std::string TRUE = "true";
+};
+
+typedef ConstSingleton<TracingTagValues> Tags;
+
 class HttpTracerUtility {
 public:
   /**
@@ -42,7 +89,7 @@ public:
    *
    * @return decision if request is traceable or not and Reason why.
    **/
-  static Decision isTracing(const Http::AccessLog::RequestInfo& request_info,
+  static Decision isTracing(const RequestInfo::RequestInfo& request_info,
                             const Http::HeaderMap& request_headers);
 
   /**
@@ -55,12 +102,26 @@ public:
    * 2) Finish active span.
    */
   static void finalizeSpan(Span& span, const Http::HeaderMap* request_headers,
-                           const Http::AccessLog::RequestInfo& request_info,
+                           const RequestInfo::RequestInfo& request_info,
                            const Config& tracing_config);
 
   static const std::string INGRESS_OPERATION;
   static const std::string EGRESS_OPERATION;
 };
+
+class EgressConfigImpl : public Config {
+public:
+  // Tracing::Config
+  Tracing::OperationName operationName() const override { return Tracing::OperationName::Egress; }
+  const std::vector<Http::LowerCaseString>& requestHeadersForTags() const override {
+    return request_headers_for_tags_;
+  }
+
+private:
+  const std::vector<Http::LowerCaseString> request_headers_for_tags_;
+};
+
+typedef ConstSingleton<EgressConfigImpl> EgressConfig;
 
 class NullSpan : public Span {
 public:
@@ -82,7 +143,7 @@ public:
 class HttpNullTracer : public HttpTracer {
 public:
   // Tracing::HttpTracer
-  SpanPtr startSpan(const Config&, Http::HeaderMap&, const Http::AccessLog::RequestInfo&) override {
+  SpanPtr startSpan(const Config&, Http::HeaderMap&, const RequestInfo::RequestInfo&) override {
     return SpanPtr{new NullSpan()};
   }
 };
@@ -93,7 +154,7 @@ public:
 
   // Tracing::HttpTracer
   SpanPtr startSpan(const Config& config, Http::HeaderMap& request_headers,
-                    const Http::AccessLog::RequestInfo& request_info) override;
+                    const RequestInfo::RequestInfo& request_info) override;
 
 private:
   DriverPtr driver_;

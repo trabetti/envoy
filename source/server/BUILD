@@ -24,6 +24,7 @@ envoy_cc_library(
     external_deps = [
         "envoy_bootstrap",
         "envoy_lds",
+        "envoy_trace",
     ],
     deps = [
         ":lds_api_lib",
@@ -113,6 +114,7 @@ envoy_cc_library(
         "//include/envoy/server:hot_restart_interface",
         "//include/envoy/server:instance_interface",
         "//include/envoy/server:options_interface",
+        "//source/common/api:os_sys_calls_lib",
         "//source/common/common:assert_lib",
         "//source/common/common:utility_lib",
         "//source/common/network:utility_lib",
@@ -162,8 +164,11 @@ envoy_cc_library(
         "//include/envoy/config:subscription_interface",
         "//include/envoy/init:init_interface",
         "//include/envoy/server:listener_manager_interface",
+        "//source/common/common:cleanup_lib",
+        "//source/common/config:resources_lib",
         "//source/common/config:subscription_factory_lib",
         "//source/common/config:utility_lib",
+        "//source/common/protobuf:utility_lib",
     ],
 )
 

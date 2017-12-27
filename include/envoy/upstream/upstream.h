@@ -119,28 +119,15 @@ public:
 typedef std::shared_ptr<const Host> HostConstSharedPtr;
 
 /**
- * Base host set interface. This is used both for clusters, as well as per thread/worker host sets
- * used during routing/forwarding.
+ * Base host set interface. This contains all of the endpoints for a given LocalityLbEndpoints
+ * priority level.
  */
 class HostSet {
 public:
+  typedef std::shared_ptr<const std::vector<HostSharedPtr>> HostVectorConstSharedPtr;
+  typedef std::shared_ptr<const std::vector<std::vector<HostSharedPtr>>> HostListsConstSharedPtr;
+
   virtual ~HostSet() {}
-
-  /**
-   * Called when cluster host membership is about to change.
-   * @param hosts_added supplies the newly added hosts, if any.
-   * @param hosts_removed supplies the removed hosts, if any.
-   */
-  typedef std::function<void(const std::vector<HostSharedPtr>& hosts_added,
-                             const std::vector<HostSharedPtr>& hosts_removed)>
-      MemberUpdateCb;
-
-  /**
-   * Install a callback that will be invoked when the cluster membership changes.
-   * @param callback supplies the callback to invoke.
-   * @return Common::CallbackHandle* the callback handle.
-   */
-  virtual Common::CallbackHandle* addMemberUpdateCb(MemberUpdateCb callback) const PURE;
 
   /**
    * @return all hosts that make up the set at the current time.
@@ -168,6 +155,64 @@ public:
    * @return same as hostsPerLocality but only contains healthy hosts.
    */
   virtual const std::vector<std::vector<HostSharedPtr>>& healthyHostsPerLocality() const PURE;
+
+  /**
+   * Updates the hosts in a given host set.
+   *
+   * @param hosts supplies the (usually new) list of hosts in the host set.
+   * @param healthy hosts supplies the subset of hosts which are healthy.
+   * @param hosts_per_locality supplies the hosts subdivided by locality.
+   * @param hosts_per_locality supplies the healthy hosts subdivided by locality.
+   * @param hosts_added supplies the hosts added since the last update.
+   * @param hosts_removed supplies the hosts removed since the last update.
+   */
+  virtual void updateHosts(HostVectorConstSharedPtr hosts, HostVectorConstSharedPtr healthy_hosts,
+                           HostListsConstSharedPtr hosts_per_locality,
+                           HostListsConstSharedPtr healthy_hosts_per_locality,
+                           const std::vector<HostSharedPtr>& hosts_added,
+                           const std::vector<HostSharedPtr>& hosts_removed) PURE;
+
+  /**
+   * @return uint32_t the priority of this host set.
+   */
+  virtual uint32_t priority() const PURE;
+};
+
+typedef std::unique_ptr<HostSet> HostSetPtr;
+
+/**
+ * This class contains all of the HostSets for a given cluster grouped by priority, for
+ * ease of load balancing.
+ */
+class PrioritySet {
+public:
+  typedef std::function<void(uint32_t priority, const std::vector<HostSharedPtr>& hosts_added,
+                             const std::vector<HostSharedPtr>& hosts_removed)>
+      MemberUpdateCb;
+
+  virtual ~PrioritySet() {}
+
+  /**
+   * Install a callback that will be invoked when any of the HostSets in the PrioritySet changes.
+   * This includes when a new HostSet is created.
+   *
+   * @param callback supplies the callback to invoke.
+   * @return Common::CallbackHandle* a handle which can be used to unregister the callback.
+   */
+  virtual Common::CallbackHandle* addMemberUpdateCb(MemberUpdateCb callback) const PURE;
+
+  /**
+   * Returns the host sets for this priority set, ordered by priority.
+   * The first element in the vector is the host set for priority 0, and so on.
+   *
+   * @return std::vector<HostSetPtr>& the host sets for this priority set.
+   */
+  virtual std::vector<HostSetPtr>& hostSetsPerPriority() PURE;
+
+  /**
+   * @return const std::vector<HostSetPtr>& the host sets, ordered by priority.
+   */
+  virtual const std::vector<HostSetPtr>& hostSetsPerPriority() const PURE;
 };
 
 /**
@@ -195,6 +240,7 @@ public:
   COUNTER  (upstream_cx_http2_total)                                                               \
   COUNTER  (upstream_cx_connect_fail)                                                              \
   COUNTER  (upstream_cx_connect_timeout)                                                           \
+  COUNTER  (upstream_cx_connect_attempts_exceeded)                                                 \
   COUNTER  (upstream_cx_overflow)                                                                  \
   HISTOGRAM(upstream_cx_connect_ms)                                                                \
   HISTOGRAM(upstream_cx_length_ms)                                                                 \
@@ -313,6 +359,11 @@ public:
   virtual LoadBalancerType lbType() const PURE;
 
   /**
+   * @return configuration for ring hash load balancing, only used if type is set to ring_hash_lb.
+   */
+  virtual const Optional<envoy::api::v2::Cluster::RingHashLbConfig>& lbRingHashConfig() const PURE;
+
+  /**
    * @return Whether the cluster is currently in maintenance mode and should not be routed to.
    *         Different filters may handle this situation in different ways. The implementation
    *         of this routine is typically based on randomness and may not return the same answer
@@ -374,13 +425,23 @@ public:
 
 typedef std::shared_ptr<const ClusterInfo> ClusterInfoConstSharedPtr;
 
+class HealthChecker;
+
 /**
  * An upstream cluster (group of hosts). This class is the "primary" singleton cluster used amongst
  * all forwarding threads/workers. Individual HostSets are used on the workers themselves.
  */
-class Cluster : public virtual HostSet {
+class Cluster {
 public:
+  virtual ~Cluster() {}
+
   enum class InitializePhase { Primary, Secondary };
+
+  /**
+   * @return a pointer to the cluster's health checker. If a health checker has not been installed,
+   *         returns nullptr.
+   */
+  virtual HealthChecker* healthChecker() PURE;
 
   /**
    * @return the information about this upstream cluster.
@@ -389,15 +450,19 @@ public:
 
   /**
    * @return a pointer to the cluster's outlier detector. If an outlier detector has not been
-   *         installed, returns a nullptr.
+   *         installed, returns nullptr.
    */
+  virtual Outlier::Detector* outlierDetector() PURE;
   virtual const Outlier::Detector* outlierDetector() const PURE;
 
   /**
    * Initialize the cluster. This will be called either immediately at creation or after all primary
    * clusters have been initialized (determined via initializePhase()).
+   * @param callback supplies a callback that will be invoked after the cluster has undergone first
+   *        time initialization. E.g., for a dynamic DNS cluster the initialize callback will be
+   *        called when initial DNS resolution is complete.
    */
-  virtual void initialize() PURE;
+  virtual void initialize(std::function<void()> callback) PURE;
 
   /**
    * @return the phase in which the cluster is initialized at boot. This mechanism is used such that
@@ -407,11 +472,14 @@ public:
   virtual InitializePhase initializePhase() const PURE;
 
   /**
-   * Set a callback that will be invoked after the cluster has undergone first time initialization.
-   * E.g., for a dynamic DNS cluster the initialize callback will be called when initial DNS
-   * resolution is complete.
+   * @return the PrioritySet for the cluster.
    */
-  virtual void setInitializedCb(std::function<void()> callback) PURE;
+  virtual PrioritySet& prioritySet() PURE;
+
+  /**
+   * @return the const PrioritySet for the cluster.
+   */
+  virtual const PrioritySet& prioritySet() const PURE;
 };
 
 typedef std::shared_ptr<Cluster> ClusterSharedPtr;

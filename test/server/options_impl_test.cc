@@ -3,12 +3,17 @@
 #include <string>
 #include <vector>
 
+#include "envoy/common/exception.h"
+
 #include "common/common/utility.h"
 
 #include "server/options_impl.h"
 
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "spdlog/spdlog.h"
+
+using testing::HasSubstr;
 
 namespace Envoy {
 // Do the ugly work of turning a std::string into a char** and create an OptionsImpl. Args are
@@ -24,16 +29,31 @@ std::unique_ptr<OptionsImpl> createOptionsImpl(const std::string& args) {
                                                       spdlog::level::warn));
 }
 
-TEST(OptionsImplDeathTest, HotRestartVersion) {
-  EXPECT_EXIT(createOptionsImpl("envoy --hot-restart-version"), testing::ExitedWithCode(0), "");
+TEST(OptionsImplTest, HotRestartVersion) {
+  try {
+    createOptionsImpl("envoy --hot-restart-version");
+    FAIL();
+  } catch (const NoServingException& e) {
+    SUCCEED();
+  }
 }
 
-TEST(OptionsImplDeathTest, InvalidMode) {
-  EXPECT_EXIT(createOptionsImpl("envoy --mode bogus"), testing::ExitedWithCode(1), "bogus");
+TEST(OptionsImplTest, InvalidMode) {
+  try {
+    createOptionsImpl("envoy --mode bogus");
+    FAIL();
+  } catch (const MalformedArgvException& e) {
+    EXPECT_THAT(e.what(), HasSubstr("bogus"));
+  }
 }
 
-TEST(OptionsImplDeathTest, InvalidCommandLine) {
-  EXPECT_EXIT(createOptionsImpl("envoy ---blah"), testing::ExitedWithCode(1), "PARSE ERROR");
+TEST(OptionsImplTest, InvalidCommandLine) {
+  try {
+    createOptionsImpl("envoy --blah");
+    FAIL();
+  } catch (const MalformedArgvException& e) {
+    EXPECT_THAT(e.what(), HasSubstr("Couldn't find match for argument"));
+  }
 }
 
 TEST(OptionsImplTest, All) {
@@ -41,10 +61,11 @@ TEST(OptionsImplTest, All) {
       "envoy --mode validate --concurrency 2 -c hello --admin-address-path path --restart-epoch 1 "
       "--local-address-ip-version v6 -l info --service-cluster cluster --service-node node "
       "--service-zone zone --file-flush-interval-msec 9000 --drain-time-s 60 "
-      "--parent-shutdown-time-s 90 --log-path /foo/bar");
+      "--parent-shutdown-time-s 90 --log-path /foo/bar --v2-config-only");
   EXPECT_EQ(Server::Mode::Validate, options->mode());
   EXPECT_EQ(2U, options->concurrency());
   EXPECT_EQ("hello", options->configPath());
+  EXPECT_TRUE(options->v2ConfigOnly());
   EXPECT_EQ("path", options->adminAddressPath());
   EXPECT_EQ(Network::Address::IpVersion::v6, options->localAddressIpVersion());
   EXPECT_EQ(1U, options->restartEpoch());
@@ -68,12 +89,20 @@ TEST(OptionsImplTest, DefaultParams) {
 }
 
 TEST(OptionsImplTest, BadCliOption) {
-  EXPECT_DEATH(createOptionsImpl("envoy -c hello --local-address-ip-version foo"),
-               "error: unknown IP address version 'foo'");
+  try {
+    createOptionsImpl("envoy -c hello --local-address-ip-version foo");
+    FAIL();
+  } catch (const MalformedArgvException& e) {
+    EXPECT_THAT(e.what(), HasSubstr("error: unknown IP address version 'foo'"));
+  }
 }
 
 TEST(OptionsImplTest, BadObjNameLenOption) {
-  EXPECT_DEATH(createOptionsImpl("envoy --max-obj-name-len 1"),
-               "error: the 'max-obj-name-len' value specified");
+  try {
+    createOptionsImpl("envoy --max-obj-name-len 1");
+    FAIL();
+  } catch (const MalformedArgvException& e) {
+    EXPECT_THAT(e.what(), HasSubstr("'max-obj-name-len' value specified"));
+  }
 }
 } // namespace Envoy

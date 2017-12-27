@@ -55,7 +55,7 @@ void FakeStream::encodeHeaders(const Http::HeaderMapImpl& headers, bool end_stre
       new Http::HeaderMapImpl(static_cast<const Http::HeaderMap&>(headers)));
   if (add_served_by_header_) {
     headers_copy->addCopy(Http::LowerCaseString("x-served-by"),
-                          parent_.connection().localAddress().asString());
+                          parent_.connection().localAddress()->asString());
   }
   parent_.connection().dispatcher().post([this, headers_copy, end_stream]() -> void {
     encoder_.encodeHeaders(*headers_copy, end_stream);
@@ -194,8 +194,8 @@ void FakeConnectionBase::waitForDisconnect(bool ignore_spurious_events) {
     connection_event_.wait(lock);
     // The default behavior of waitForDisconnect is to assume the test cleanly
     // calls waitForData, waitForNewStream, etc. to handle all events on the
-    // connection.  If the caller explicitly notes that other events should be
-    // ignored, continue looping until a disconnect is detected.  Otherwise fall
+    // connection. If the caller explicitly notes that other events should be
+    // ignored, continue looping until a disconnect is detected. Otherwise fall
     // through and hit the assert below.
     if (!ignore_spurious_events) {
       break;
@@ -364,12 +364,13 @@ FakeRawConnectionPtr FakeUpstream::waitForRawConnection() {
   return connection;
 }
 
-void FakeRawConnection::waitForData(uint64_t num_bytes) {
+std::string FakeRawConnection::waitForData(uint64_t num_bytes) {
   std::unique_lock<std::mutex> lock(lock_);
   while (data_.size() != num_bytes) {
     ENVOY_LOG(debug, "waiting for {} bytes of data", num_bytes);
     connection_event_.wait(lock);
   }
+  return data_;
 }
 
 void FakeRawConnection::write(const std::string& data) {

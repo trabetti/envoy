@@ -72,12 +72,18 @@ class Connection : public Event::DeferredDeletable, public FilterManager {
 public:
   enum class State { Open, Closing, Closed };
 
+  /**
+   * Callback function for when bytes have been sent by a connection.
+   * @param bytes_sent supplies the number of bytes written to the connection.
+   */
+  typedef std::function<void(uint64_t bytes_sent)> BytesSentCb;
+
   struct ConnectionStats {
     Stats::Counter& read_total_;
     Stats::Gauge& read_current_;
     Stats::Counter& write_total_;
     Stats::Gauge& write_current_;
-    // Counter* as this is an optional counter.  Bind errors will not be tracked if this is nullptr.
+    // Counter* as this is an optional counter. Bind errors will not be tracked if this is nullptr.
     Stats::Counter* bind_errors_;
   };
 
@@ -87,6 +93,11 @@ public:
    * Register callbacks that fire when connection events occur.
    */
   virtual void addConnectionCallbacks(ConnectionCallbacks& cb) PURE;
+
+  /**
+   * Register for callback everytime bytes are written to the underlying TransportSocket.
+   */
+  virtual void addBytesSentCallback(BytesSentCb cb) PURE;
 
   /**
    * Close the connection.
@@ -138,17 +149,17 @@ public:
   virtual bool readEnabled() const PURE;
 
   /**
-   * @return The address of the remote client.
+   * @return The address of the remote client. Note that this method will never return nullptr.
    */
-  virtual const Address::Instance& remoteAddress() const PURE;
+  virtual const Network::Address::InstanceConstSharedPtr& remoteAddress() const PURE;
 
   /**
    * @return the local address of the connection. For client connections, this is the origin
    * address. For server connections, this is the local destination address. For server connections
    * it can be different from the proxy address if the downstream connection has been redirected or
-   * the proxy is operating in transparent mode.
+   * the proxy is operating in transparent mode. Note that this method will never return nullptr.
    */
-  virtual const Address::Instance& localAddress() const PURE;
+  virtual const Network::Address::InstanceConstSharedPtr& localAddress() const PURE;
 
   /**
    * Set the stats to update for various connection state changes. Note that for performance reasons
@@ -182,9 +193,9 @@ public:
    * Set a soft limit on the size of buffers for the connection.
    * For the read buffer, this limits the bytes read prior to flushing to further stages in the
    * processing pipeline.
-   * For the write buffer, it sets watermarks.  When enough data is buffered it triggers a call to
+   * For the write buffer, it sets watermarks. When enough data is buffered it triggers a call to
    * onAboveWriteBufferHighWatermark, which allows subscribers to enforce flow control by disabling
-   * reads on the socket funneling data to the write buffer.  When enough data is drained from the
+   * reads on the socket funneling data to the write buffer. When enough data is drained from the
    * write buffer, onBelowWriteBufferHighWatermark is called which similarly allows subscribers
    * resuming reading.
    */

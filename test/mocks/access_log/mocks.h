@@ -24,5 +24,16 @@ public:
   std::shared_ptr<Filesystem::MockFile> file_{new testing::NiceMock<Filesystem::MockFile>()};
 };
 
+class MockInstance : public Instance {
+public:
+  MockInstance();
+  ~MockInstance();
+
+  // AccessLog::Instance
+  MOCK_METHOD3(log,
+               void(const Http::HeaderMap* request_headers, const Http::HeaderMap* response_headers,
+                    const RequestInfo::RequestInfo& request_info));
+};
+
 } // namespace AccessLog
 } // namespace Envoy

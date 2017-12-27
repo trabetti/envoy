@@ -88,6 +88,15 @@ public:
    */
   static void flushCountersAndGaugesToSinks(const std::list<Stats::SinkPtr>& sinks,
                                             Stats::Store& store);
+
+  /**
+   * Load a bootstrap config from either v1 or v2 and perform validation.
+   * @param bootstrap supplies the bootstrap to fill.
+   * @param config_path supplies the config path.
+   * @param v2_only supplies whether to attempt v1 fallback.
+   */
+  static void loadBootstrapConfig(envoy::api::v2::Bootstrap& bootstrap,
+                                  const std::string& config_path, bool v2_only);
 };
 
 /**
@@ -112,6 +121,9 @@ private:
  */
 class InstanceImpl : Logger::Loggable<Logger::Id::main>, public Instance {
 public:
+  /**
+   * @throw EnvoyException if initialization fails.
+   */
   InstanceImpl(Options& options, Network::Address::InstanceConstSharedPtr local_address,
                TestHooks& hooks, HotRestart& restarter, Stats::StoreRoot& store,
                Thread::BasicLockable& access_log_lock, ComponentFactory& component_factory,

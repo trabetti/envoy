@@ -42,8 +42,9 @@ public:
 
   /**
    * @return DrainManagerPtr a new drain manager.
+   * @param drain_type supplies the type of draining to do for the owning listener.
    */
-  virtual DrainManagerPtr createDrainManager() PURE;
+  virtual DrainManagerPtr createDrainManager(envoy::api::v2::Listener::DrainType drain_type) PURE;
 
   /**
    * @return uint64_t a listener tag usable for connection handler tracking.
@@ -71,9 +72,9 @@ public:
   virtual Network::ListenSocket& socket() PURE;
 
   /**
-   * @return Ssl::ServerContext* the SSL context
+   * @return Ssl::ServerContext* the default SSL context.
    */
-  virtual Ssl::ServerContext* sslContext() PURE;
+  virtual Ssl::ServerContext* defaultSslContext() PURE;
 
   /**
    * @return bool whether to use the PROXY Protocol V1

@@ -26,7 +26,6 @@ public:
   const std::string versionInfo() const { return subscription_->versionInfo(); }
 
   // Upstream::Cluster
-  void initialize() override;
   InitializePhase initializePhase() const override { return InitializePhase::Secondary; }
 
   // Config::SubscriptionCallbacks
@@ -34,12 +33,15 @@ public:
   void onConfigUpdateFailed(const EnvoyException* e) override;
 
 private:
-  void runInitializeCallbackIfAny();
+  void updateHostsPerLocality(HostSet& host_set, std::vector<HostSharedPtr>& new_hosts);
 
+  // ClusterImplBase
+  void startPreInit() override;
+
+  const ClusterManager& cm_;
   std::unique_ptr<Config::Subscription<envoy::api::v2::ClusterLoadAssignment>> subscription_;
   const LocalInfo::LocalInfo& local_info_;
   const std::string cluster_name_;
-  uint64_t pending_health_checks_{};
 };
 
 } // namespace Upstream

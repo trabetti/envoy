@@ -1,25 +1,43 @@
 #include "server/config/http/fault.h"
 
-#include <string>
-
 #include "envoy/registry/registry.h"
 
+#include "common/config/filter_json.h"
 #include "common/http/filter/fault_filter.h"
-#include "common/json/config_schemas.h"
+
+#include "api/filter/http/fault.pb.validate.h"
 
 namespace Envoy {
 namespace Server {
 namespace Configuration {
 
+HttpFilterFactoryCb
+FaultFilterConfig::createFilter(const envoy::api::v2::filter::http::HTTPFault& config,
+                                const std::string& stats_prefix, FactoryContext& context) {
+  Http::FaultFilterConfigSharedPtr filter_config(
+      new Http::FaultFilterConfig(config, context.runtime(), stats_prefix, context.scope()));
+  return [filter_config](Http::FilterChainFactoryCallbacks& callbacks) -> void {
+    callbacks.addStreamDecoderFilter(
+        Http::StreamDecoderFilterSharedPtr{new Http::FaultFilter(filter_config)});
+  };
+}
+
 HttpFilterFactoryCb FaultFilterConfig::createFilterFactory(const Json::Object& json_config,
                                                            const std::string& stats_prefix,
                                                            FactoryContext& context) {
-  Http::FaultFilterConfigSharedPtr config(
-      new Http::FaultFilterConfig(json_config, context.runtime(), stats_prefix, context.scope()));
-  return [config](Http::FilterChainFactoryCallbacks& callbacks) -> void {
-    callbacks.addStreamDecoderFilter(
-        Http::StreamDecoderFilterSharedPtr{new Http::FaultFilter(config)});
-  };
+  envoy::api::v2::filter::http::HTTPFault proto_config;
+  Config::FilterJson::translateFaultFilter(json_config, proto_config);
+  return createFilter(proto_config, stats_prefix, context);
+}
+
+HttpFilterFactoryCb
+FaultFilterConfig::createFilterFactoryFromProto(const Protobuf::Message& proto_config,
+                                                const std::string& stats_prefix,
+                                                FactoryContext& context) {
+  return createFilter(
+      MessageUtil::downcastAndValidate<const envoy::api::v2::filter::http::HTTPFault&>(
+          proto_config),
+      stats_prefix, context);
 }
 
 /**

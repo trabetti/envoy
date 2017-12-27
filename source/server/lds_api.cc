@@ -1,9 +1,14 @@
 #include "server/lds_api.h"
 
+#include "common/common/cleanup.h"
+#include "common/config/resources.h"
 #include "common/config/subscription_factory.h"
 #include "common/config/utility.h"
+#include "common/protobuf/utility.h"
 
 #include "server/lds_subscription.h"
+
+#include "api/lds.pb.validate.h"
 
 namespace Envoy {
 namespace Server {
@@ -12,7 +17,7 @@ LdsApi::LdsApi(const envoy::api::v2::ConfigSource& lds_config, Upstream::Cluster
                Event::Dispatcher& dispatcher, Runtime::RandomGenerator& random,
                Init::Manager& init_manager, const LocalInfo::LocalInfo& local_info,
                Stats::Scope& scope, ListenerManager& lm)
-    : listener_manager_(lm), scope_(scope.createScope("listener_manager.lds.")) {
+    : listener_manager_(lm), scope_(scope.createScope("listener_manager.lds.")), cm_(cm) {
   subscription_ =
       Envoy::Config::SubscriptionFactory::subscriptionFromConfigSource<envoy::api::v2::Listener>(
           lds_config, local_info.node(), dispatcher, cm, random, *scope_,
@@ -33,6 +38,11 @@ void LdsApi::initialize(std::function<void()> callback) {
 }
 
 void LdsApi::onConfigUpdate(const ResourceVector& resources) {
+  cm_.adsMux().pause(Config::TypeUrl::get().RouteConfiguration);
+  Cleanup rds_resume([this] { cm_.adsMux().resume(Config::TypeUrl::get().RouteConfiguration); });
+  for (const auto& listener : resources) {
+    MessageUtil::validate(listener);
+  }
   // We need to keep track of which listeners we might need to remove.
   std::unordered_map<std::string, std::reference_wrapper<Listener>> listeners_to_remove;
   for (const auto& listener : listener_manager_.listeners()) {

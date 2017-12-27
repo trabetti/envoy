@@ -14,19 +14,24 @@ class LoadStatsIntegrationTest : public HttpIntegrationTest,
 public:
   LoadStatsIntegrationTest() : HttpIntegrationTest(Http::CodecClient::Type::HTTP1, GetParam()) {}
 
-  void addEndpoint(envoy::api::v2::LocalityLbEndpoints& locality_lb_endpoints, uint32_t index) {
+  void addEndpoint(envoy::api::v2::LocalityLbEndpoints& locality_lb_endpoints, uint32_t index,
+                   uint32_t& num_endpoints) {
     auto* socket_address = locality_lb_endpoints.add_lb_endpoints()
                                ->mutable_endpoint()
                                ->mutable_address()
                                ->mutable_socket_address();
     socket_address->set_address(Network::Test::getLoopbackAddressString(GetParam()));
     socket_address->set_port_value(service_upstream_[index]->localAddress()->ip()->port());
+    ++num_endpoints;
   }
 
   // We need to supply the endpoints via EDS to provide locality information for
   // load reporting. Use a filesystem delivery to simplify test mechanics.
   void updateClusterLoadAssignment(const std::vector<uint32_t>& winter_upstreams,
-                                   const std::vector<uint32_t>& dragon_upstreeams) {
+                                   const std::vector<uint32_t>& dragon_upstreeams,
+                                   const std::vector<uint32_t>& p1_winter_upstreams,
+                                   const std::vector<uint32_t>& p1_dragon_upstreams) {
+    uint32_t num_endpoints = 0;
     envoy::api::v2::ClusterLoadAssignment cluster_load_assignment;
     cluster_load_assignment.set_cluster_name("cluster_0");
 
@@ -35,7 +40,7 @@ public:
     winter->mutable_locality()->set_zone("zone_name");
     winter->mutable_locality()->set_sub_zone("winter");
     for (uint32_t index : winter_upstreams) {
-      addEndpoint(*winter, index);
+      addEndpoint(*winter, index, num_endpoints);
     }
 
     auto* dragon = cluster_load_assignment.add_endpoints();
@@ -43,7 +48,25 @@ public:
     dragon->mutable_locality()->set_zone("zone_name");
     dragon->mutable_locality()->set_sub_zone("dragon");
     for (uint32_t index : dragon_upstreeams) {
-      addEndpoint(*dragon, index);
+      addEndpoint(*dragon, index, num_endpoints);
+    }
+
+    auto* winter_p1 = cluster_load_assignment.add_endpoints();
+    winter_p1->set_priority(1);
+    winter_p1->mutable_locality()->set_region("some_region");
+    winter_p1->mutable_locality()->set_zone("zone_name");
+    winter_p1->mutable_locality()->set_sub_zone("winter");
+    for (uint32_t index : p1_winter_upstreams) {
+      addEndpoint(*winter_p1, index, num_endpoints);
+    }
+
+    auto* dragon_p1 = cluster_load_assignment.add_endpoints();
+    dragon_p1->set_priority(1);
+    dragon_p1->mutable_locality()->set_region("some_region");
+    dragon_p1->mutable_locality()->set_zone("zone_name");
+    dragon_p1->mutable_locality()->set_sub_zone("dragon");
+    for (uint32_t index : p1_dragon_upstreams) {
+      addEndpoint(*dragon_p1, index, num_endpoints);
     }
 
     // Write to file the DiscoveryResponse and trigger inotify watch.
@@ -61,21 +84,20 @@ public:
                                                                    eds_response.DebugString());
       ASSERT_EQ(0, ::rename(path.c_str(), eds_path_.c_str()));
     }
+    // For every update wait for the update to be processed by Envoy. The nullptr check avoids a
+    // segfault on initial config, where the server is not created yet.
+    if (test_server_) {
+      test_server_->waitForGaugeGe("cluster.cluster_0.membership_total", num_endpoints);
+    }
   }
 
   void createUpstreams() override {
     fake_upstreams_.emplace_back(new FakeUpstream(0, FakeHttpConnection::Type::HTTP2, version_));
-    ports_.push_back(fake_upstreams_.back()->localAddress()->ip()->port());
     load_report_upstream_ = fake_upstreams_.back().get();
-
-    for (uint32_t i = 0; i < upstream_endpoints_; ++i) {
-      fake_upstreams_.emplace_back(new FakeUpstream(0, FakeHttpConnection::Type::HTTP1, version_));
-      service_upstream_[i] = fake_upstreams_.back().get();
-    }
   }
 
   void initialize() override {
-    updateClusterLoadAssignment({}, {});
+    updateClusterLoadAssignment({}, {}, {}, {});
     config_helper_.addConfigModifier([this](envoy::api::v2::Bootstrap& bootstrap) {
       // Setup load reporting and corresponding gRPC cluster.
       auto* loadstats_config = bootstrap.mutable_cluster_manager()->mutable_load_stats_config();
@@ -101,6 +123,10 @@ public:
     });
     named_ports_ = {"http"};
     HttpIntegrationTest::initialize();
+    for (uint32_t i = 0; i < upstream_endpoints_; ++i) {
+      fake_upstreams_.emplace_back(new FakeUpstream(0, FakeHttpConnection::Type::HTTP1, version_));
+      service_upstream_[i] = fake_upstreams_.back().get();
+    }
   }
 
   void initiateClientConnection() {
@@ -163,17 +189,20 @@ public:
     EXPECT_EQ(response_size_, response_->body().size());
   }
 
-  void sendLoadStatsResponse(const std::vector<std::string>& clusters, uint32_t secs) {
+  void requestLoadStatsResponse(const std::vector<std::string>& clusters, uint32_t secs) {
     envoy::api::v2::LoadStatsResponse loadstats_response;
     loadstats_response.mutable_load_reporting_interval()->set_seconds(secs);
     for (const auto& cluster : clusters) {
       loadstats_response.add_clusters(cluster);
     }
     loadstats_stream_->sendGrpcMessage(loadstats_response);
+    // Wait until the request has been received by Envoy.
+    test_server_->waitForCounterGe("load_reporter.requests", ++load_requests_);
   }
 
   envoy::api::v2::UpstreamLocalityStats localityStats(const std::string& sub_zone, uint64_t success,
-                                                      uint64_t error, uint64_t active) {
+                                                      uint64_t error, uint64_t active,
+                                                      uint32_t priority = 0) {
     envoy::api::v2::UpstreamLocalityStats locality_stats;
     auto* locality = locality_stats.mutable_locality();
     locality->set_region("some_region");
@@ -182,6 +211,7 @@ public:
     locality_stats.set_total_successful_requests(success);
     locality_stats.set_total_error_requests(error);
     locality_stats.set_total_requests_in_progress(active);
+    locality_stats.set_priority(priority);
     return locality_stats;
   }
 
@@ -206,7 +236,7 @@ public:
     cleanupUpstreamConnection();
   }
 
-  static constexpr uint32_t upstream_endpoints_ = 3;
+  static constexpr uint32_t upstream_endpoints_ = 5;
 
   FakeHttpConnectionPtr fake_loadstats_connection_;
   FakeStreamPtr loadstats_stream_;
@@ -214,6 +244,7 @@ public:
   FakeUpstream* service_upstream_[upstream_endpoints_]{};
   std::string eds_path_;
   uint32_t eds_version_{};
+  uint32_t load_requests_{};
 
   const uint64_t request_size_ = 1024;
   const uint64_t response_size_ = 512;
@@ -233,66 +264,78 @@ TEST_P(LoadStatsIntegrationTest, Success) {
 
   // Simple 50%/50% split between dragon/winter localities. Also include an
   // unknown cluster to exercise the handling of this case.
-  sendLoadStatsResponse({"cluster_0", "cluster_1"}, 1);
-  test_server_->waitForCounterGe("load_reporter.requests", 1);
+  requestLoadStatsResponse({"cluster_0", "cluster_1"}, 1);
 
-  updateClusterLoadAssignment({0}, {1});
-  test_server_->waitForGaugeGe("cluster.cluster_0.membership_total", 2);
+  updateClusterLoadAssignment({0}, {1}, {3}, {});
 
   for (uint32_t i = 0; i < 4; ++i) {
     sendAndReceiveUpstream(i % 2);
   }
 
-  waitForLoadStatsRequest({localityStats("winter", 2, 0, 0), localityStats("dragon", 2, 0, 0)});
+  // Verify we do not get empty stats for non-zero priorities.
+  waitForLoadStatsRequest({localityStats("winter", 2, 0, 0), localityStats("dragon", 2, 0, 0),
+                           localityStats("winter", 0, 0, 0, 1)});
 
   EXPECT_EQ(1, test_server_->counter("load_reporter.requests")->value());
   EXPECT_EQ(2, test_server_->counter("load_reporter.responses")->value());
   EXPECT_EQ(0, test_server_->counter("load_reporter.errors")->value());
 
-  // 33%/67% split between dragon/winter localities.
-  updateClusterLoadAssignment({0}, {1, 2});
-  sendLoadStatsResponse({"cluster_0"}, 1);
-  test_server_->waitForGaugeGe("cluster.cluster_0.membership_total", 3);
+  // 33%/67% split between dragon/winter primary localities.
+  updateClusterLoadAssignment({0}, {1, 2}, {}, {4});
+  requestLoadStatsResponse({"cluster_0"}, 1);
 
   for (uint32_t i = 0; i < 6; ++i) {
     sendAndReceiveUpstream((i + 1) % 3);
   }
 
+  // No locality for priority=1 since there's no "winter" endpoints.
+  // The hosts for dragon were receiced because membership_total is accurate.
   waitForLoadStatsRequest({localityStats("winter", 2, 0, 0), localityStats("dragon", 4, 0, 0)});
 
   EXPECT_EQ(2, test_server_->counter("load_reporter.requests")->value());
   EXPECT_EQ(3, test_server_->counter("load_reporter.responses")->value());
   EXPECT_EQ(0, test_server_->counter("load_reporter.errors")->value());
 
+  // Change to 50/50 for the failover clusters.
+  updateClusterLoadAssignment({}, {}, {3}, {4});
+  requestLoadStatsResponse({"cluster_0"}, 1);
+  test_server_->waitForGaugeEq("cluster.cluster_0.membership_total", 2);
+
+  for (uint32_t i = 0; i < 4; ++i) {
+    sendAndReceiveUpstream(i % 2 + 3);
+  }
+
+  waitForLoadStatsRequest(
+      {localityStats("winter", 2, 0, 0, 1), localityStats("dragon", 2, 0, 0, 1)});
+  EXPECT_EQ(3, test_server_->counter("load_reporter.requests")->value());
+  EXPECT_EQ(4, test_server_->counter("load_reporter.responses")->value());
+  EXPECT_EQ(0, test_server_->counter("load_reporter.errors")->value());
+
   // 100% winter locality.
-  updateClusterLoadAssignment({}, {});
-  updateClusterLoadAssignment({1}, {});
-  sendLoadStatsResponse({"cluster_0"}, 1);
-  test_server_->waitForCounterGe("load_reporter.requests", 3);
+  updateClusterLoadAssignment({}, {}, {}, {});
+  updateClusterLoadAssignment({1}, {}, {}, {});
+  requestLoadStatsResponse({"cluster_0"}, 1);
 
   for (uint32_t i = 0; i < 1; ++i) {
     sendAndReceiveUpstream(1);
   }
 
   waitForLoadStatsRequest({localityStats("winter", 1, 0, 0)});
-
-  EXPECT_EQ(3, test_server_->counter("load_reporter.requests")->value());
-  EXPECT_EQ(4, test_server_->counter("load_reporter.responses")->value());
+  EXPECT_EQ(4, test_server_->counter("load_reporter.requests")->value());
+  EXPECT_EQ(5, test_server_->counter("load_reporter.responses")->value());
   EXPECT_EQ(0, test_server_->counter("load_reporter.errors")->value());
 
   // A LoadStatsResponse arrives before the expiration of the reporting interval.
-  sendLoadStatsResponse({"cluster_0"}, 1);
-  test_server_->waitForCounterGe("load_reporter.requests", 4);
+  requestLoadStatsResponse({"cluster_0"}, 1);
   sendAndReceiveUpstream(1);
-  sendLoadStatsResponse({"cluster_0"}, 1);
-  test_server_->waitForCounterGe("load_reporter.requests", 5);
+  requestLoadStatsResponse({"cluster_0"}, 1);
   sendAndReceiveUpstream(1);
   sendAndReceiveUpstream(1);
 
   waitForLoadStatsRequest({localityStats("winter", 2, 0, 0)});
 
-  EXPECT_EQ(5, test_server_->counter("load_reporter.requests")->value());
-  EXPECT_EQ(5, test_server_->counter("load_reporter.responses")->value());
+  EXPECT_EQ(6, test_server_->counter("load_reporter.requests")->value());
+  EXPECT_EQ(6, test_server_->counter("load_reporter.responses")->value());
   EXPECT_EQ(0, test_server_->counter("load_reporter.errors")->value());
 
   cleanupLoadStatsConnection();
@@ -306,11 +349,8 @@ TEST_P(LoadStatsIntegrationTest, Error) {
   waitForLoadStatsRequest({});
   loadstats_stream_->startGrpcStream();
 
-  sendLoadStatsResponse({"cluster_0"}, 1);
-  test_server_->waitForCounterGe("load_reporter.requests", 1);
-
-  updateClusterLoadAssignment({0}, {});
-  test_server_->waitForGaugeGe("cluster.cluster_0.membership_total", 1);
+  requestLoadStatsResponse({"cluster_0"}, 1);
+  updateClusterLoadAssignment({0}, {}, {}, {});
 
   // This should count as an error since 5xx.
   sendAndReceiveUpstream(0, 503);
@@ -335,11 +375,9 @@ TEST_P(LoadStatsIntegrationTest, InProgress) {
   waitForLoadStatsRequest({});
   loadstats_stream_->startGrpcStream();
 
-  sendLoadStatsResponse({"cluster_0"}, 1);
-  test_server_->waitForCounterGe("load_reporter.requests", 1);
+  requestLoadStatsResponse({"cluster_0"}, 1);
 
-  updateClusterLoadAssignment({0}, {});
-  test_server_->waitForGaugeGe("cluster.cluster_0.membership_total", 1);
+  updateClusterLoadAssignment({0}, {}, {}, {});
 
   initiateClientConnection();
 
@@ -368,11 +406,9 @@ TEST_P(LoadStatsIntegrationTest, Dropped) {
   waitForLoadStatsRequest({});
   loadstats_stream_->startGrpcStream();
 
-  sendLoadStatsResponse({"cluster_0"}, 1);
-  test_server_->waitForCounterGe("load_reporter.requests", 1);
+  requestLoadStatsResponse({"cluster_0"}, 1);
 
-  updateClusterLoadAssignment({0}, {});
-  test_server_->waitForGaugeGe("cluster.cluster_0.membership_total", 1);
+  updateClusterLoadAssignment({0}, {}, {}, {});
 
   // This should count as dropped, since we trigger circuit breaking.
   initiateClientConnection();

@@ -9,8 +9,10 @@
 #include "common/network/address_impl.h"
 #include "common/network/resolver_impl.h"
 #include "common/network/utility.h"
+#include "common/protobuf/utility.h"
 #include "common/upstream/sds_subscription.h"
 
+#include "api/eds.pb.validate.h"
 #include "fmt/format.h"
 
 namespace Envoy {
@@ -23,9 +25,10 @@ EdsClusterImpl::EdsClusterImpl(const envoy::api::v2::Cluster& cluster, Runtime::
                                bool added_via_api)
     : BaseDynamicClusterImpl(cluster, cm.sourceAddress(), runtime, stats, ssl_context_manager,
                              added_via_api),
-      local_info_(local_info), cluster_name_(cluster.eds_cluster_config().service_name().empty()
-                                                 ? cluster.name()
-                                                 : cluster.eds_cluster_config().service_name()) {
+      cm_(cm), local_info_(local_info),
+      cluster_name_(cluster.eds_cluster_config().service_name().empty()
+                        ? cluster.name()
+                        : cluster.eds_cluster_config().service_name()) {
   Config::Utility::checkLocalInfo("eds", local_info);
   const auto& eds_config = cluster.eds_cluster_config().eds_config();
   subscription_ = Config::SubscriptionFactory::subscriptionFromConfigSource<
@@ -39,40 +42,68 @@ EdsClusterImpl::EdsClusterImpl(const envoy::api::v2::Cluster& cluster, Runtime::
       "envoy.api.v2.EndpointDiscoveryService.StreamEndpoints");
 }
 
-void EdsClusterImpl::initialize() { subscription_->start({cluster_name_}, *this); }
+void EdsClusterImpl::startPreInit() { subscription_->start({cluster_name_}, *this); }
 
 void EdsClusterImpl::onConfigUpdate(const ResourceVector& resources) {
-  std::vector<HostSharedPtr> new_hosts;
+  typedef std::unique_ptr<std::vector<HostSharedPtr>> HostListPtr;
+  std::vector<HostListPtr> new_hosts(1);
   if (resources.empty()) {
     ENVOY_LOG(debug, "Missing ClusterLoadAssignment for {} in onConfigUpdate()", cluster_name_);
     info_->stats().update_empty_.inc();
-    runInitializeCallbackIfAny();
+    onPreInitComplete();
     return;
   }
   if (resources.size() != 1) {
     throw EnvoyException(fmt::format("Unexpected EDS resource length: {}", resources.size()));
   }
   const auto& cluster_load_assignment = resources[0];
+  MessageUtil::validate(cluster_load_assignment);
   // TODO(PiotrSikora): Remove this hack once fixed internally.
   if (!(cluster_load_assignment.cluster_name() == cluster_name_)) {
     throw EnvoyException(fmt::format("Unexpected EDS cluster (expecting {}): {}", cluster_name_,
                                      cluster_load_assignment.cluster_name()));
   }
   for (const auto& locality_lb_endpoint : cluster_load_assignment.endpoints()) {
+    const uint32_t priority = locality_lb_endpoint.priority();
+    if (priority > 0 && !cluster_name_.empty() && cluster_name_ == cm_.localClusterName()) {
+      throw EnvoyException(
+          fmt::format("Unexpected non-zero priority for local cluster '{}'.", cluster_name_));
+    }
+    if (new_hosts.size() <= priority) {
+      new_hosts.resize(priority + 1);
+    }
+    if (new_hosts[priority] == nullptr) {
+      new_hosts[priority] = HostListPtr{new std::vector<HostSharedPtr>};
+    }
     for (const auto& lb_endpoint : locality_lb_endpoint.lb_endpoints()) {
-      new_hosts.emplace_back(new HostImpl(
+      new_hosts[priority]->emplace_back(new HostImpl(
           info_, "", Network::Address::resolveProtoAddress(lb_endpoint.endpoint().address()),
           lb_endpoint.metadata(), lb_endpoint.load_balancing_weight().value(),
           locality_lb_endpoint.locality()));
     }
   }
 
-  HostVectorSharedPtr current_hosts_copy(new std::vector<HostSharedPtr>(hosts()));
+  for (size_t i = 0; i < new_hosts.size(); ++i) {
+    if (new_hosts[i] != nullptr) {
+      updateHostsPerLocality(priority_set_.getOrCreateHostSet(i), *new_hosts[i]);
+    }
+  }
+
+  // If we didn't setup to initialize when our first round of health checking is complete, just
+  // do it now.
+  onPreInitComplete();
+}
+
+void EdsClusterImpl::updateHostsPerLocality(HostSet& host_set,
+                                            std::vector<HostSharedPtr>& new_hosts) {
+  HostVectorSharedPtr current_hosts_copy(new std::vector<HostSharedPtr>(host_set.hosts()));
+
   std::vector<HostSharedPtr> hosts_added;
   std::vector<HostSharedPtr> hosts_removed;
   if (updateDynamicHostList(new_hosts, *current_hosts_copy, hosts_added, hosts_removed,
                             health_checker_ != nullptr)) {
-    ENVOY_LOG(debug, "EDS hosts changed for cluster: {} ({})", info_->name(), hosts().size());
+    ENVOY_LOG(debug, "EDS hosts changed for cluster: {} ({}) priority {}", info_->name(),
+              host_set.hosts().size(), host_set.priority());
     HostListsSharedPtr per_locality(new std::vector<std::vector<HostSharedPtr>>());
 
     // If local locality is not defined then skip populating per locality hosts.
@@ -97,49 +128,16 @@ void EdsClusterImpl::onConfigUpdate(const ResourceVector& resources) {
       }
     }
 
-    updateHosts(current_hosts_copy, createHealthyHostList(*current_hosts_copy), per_locality,
-                createHealthyHostLists(*per_locality), hosts_added, hosts_removed);
-
-    if (initialize_callback_ && health_checker_ && pending_health_checks_ == 0) {
-      pending_health_checks_ = hosts().size();
-      ASSERT(pending_health_checks_ > 0);
-
-      // Every time a host changes HC state we cause a full healthy host recalculation which
-      // for expensive LBs (ring, subset, etc.) can be quite time consuming. During startup, this
-      // can also block worker threads by doing this repeatedly. There is no reason to do this
-      // as we will not start taking traffic until we are initialized. By blocking HC updates
-      // while initializing we can avoid this. When HC responses for all hosts have arrived and
-      // we are about to initialize, we unblock further HC updates which has the additional effect
-      // of forcing a healthy host recalculation.
-      // TODO(mattklein123): Add similar logic for the DNS clusters.
-      blockHcUpdates(true);
-      health_checker_->addHostCheckCompleteCb([this](HostSharedPtr, bool) -> void {
-        if (pending_health_checks_ > 0 && --pending_health_checks_ == 0) {
-          blockHcUpdates(false);
-          initialize_callback_();
-          initialize_callback_ = nullptr;
-        }
-      });
-    }
+    host_set.updateHosts(current_hosts_copy, createHealthyHostList(*current_hosts_copy),
+                         per_locality, createHealthyHostLists(*per_locality), hosts_added,
+                         hosts_removed);
   }
-
-  // If we didn't setup to initialize when our first round of health checking is complete, just
-  // do it now.
-  runInitializeCallbackIfAny();
 }
 
 void EdsClusterImpl::onConfigUpdateFailed(const EnvoyException* e) {
   UNREFERENCED_PARAMETER(e);
-  // We need to allow server startup to continue, even if we have a bad
-  // config.
-  runInitializeCallbackIfAny();
-}
-
-void EdsClusterImpl::runInitializeCallbackIfAny() {
-  if (initialize_callback_ && pending_health_checks_ == 0) {
-    initialize_callback_();
-    initialize_callback_ = nullptr;
-  }
+  // We need to allow server startup to continue, even if we have a bad config.
+  onPreInitComplete();
 }
 
 } // namespace Upstream

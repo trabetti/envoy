@@ -95,6 +95,15 @@ void RdsJson::translateHeaderMatcher(const Json::Object& json_header_matcher,
   JSON_UTIL_SET_BOOL(json_header_matcher, header_matcher, regex);
 }
 
+void RdsJson::translateQueryParameterMatcher(
+    const Json::Object& json_query_parameter_matcher,
+    envoy::api::v2::QueryParameterMatcher& query_parameter_matcher) {
+  json_query_parameter_matcher.validateSchema(Json::Schema::QUERY_PARAMETER_CONFIGURATION_SCHEMA);
+  JSON_UTIL_SET_STRING(json_query_parameter_matcher, query_parameter_matcher, name);
+  JSON_UTIL_SET_STRING(json_query_parameter_matcher, query_parameter_matcher, value);
+  JSON_UTIL_SET_BOOL(json_query_parameter_matcher, query_parameter_matcher, regex);
+}
+
 void RdsJson::translateRouteConfiguration(const Json::Object& json_route_config,
                                           envoy::api::v2::RouteConfiguration& route_config) {
   json_route_config.validateSchema(Json::Schema::ROUTE_CONFIGURATION_SCHEMA);
@@ -211,6 +220,12 @@ void RdsJson::translateRoute(const Json::Object& json_route, envoy::api::v2::Rou
     translateHeaderMatcher(*json_header_matcher, *header_matcher);
   }
 
+  for (const auto json_query_parameter_matcher :
+       json_route.getObjectArray("query_parameters", true)) {
+    auto* query_parameter_matcher = match->mutable_query_parameters()->Add();
+    translateQueryParameterMatcher(*json_query_parameter_matcher, *query_parameter_matcher);
+  }
+
   bool has_redirect = false;
   if (json_route.hasObject("host_redirect") || json_route.hasObject("path_redirect")) {
     has_redirect = true;
@@ -221,11 +236,16 @@ void RdsJson::translateRoute(const Json::Object& json_route, envoy::api::v2::Rou
       throw EnvoyException("Redirect route entries must not have WebSockets set");
     }
   }
-  if (json_route.hasObject("cluster") || json_route.hasObject("cluster_header") ||
-      json_route.hasObject("weighted_clusters")) {
-    if (has_redirect) {
-      throw EnvoyException("routes must be either redirects or cluster targets");
-    }
+  const bool has_cluster = json_route.hasObject("cluster") ||
+                           json_route.hasObject("cluster_header") ||
+                           json_route.hasObject("weighted_clusters");
+
+  if (has_cluster && has_redirect) {
+    throw EnvoyException("routes must be either redirects or cluster targets");
+  } else if (!has_cluster && !has_redirect) {
+    throw EnvoyException(
+        "routes must have redirect or one of cluster/cluster_header/weighted_clusters");
+  } else if (has_cluster) {
     auto* action = route.mutable_route();
 
     if (json_route.hasObject("cluster")) {

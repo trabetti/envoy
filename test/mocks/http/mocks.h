@@ -7,7 +7,7 @@
 #include <memory>
 #include <string>
 
-#include "envoy/http/access_log.h"
+#include "envoy/access_log/access_log.h"
 #include "envoy/http/async_client.h"
 #include "envoy/http/codec.h"
 #include "envoy/http/conn_pool.h"
@@ -18,6 +18,7 @@
 
 #include "test/mocks/common.h"
 #include "test/mocks/event/mocks.h"
+#include "test/mocks/request_info/mocks.h"
 #include "test/mocks/router/mocks.h"
 #include "test/mocks/tracing/mocks.h"
 #include "test/mocks/upstream/host.h"
@@ -27,51 +28,6 @@
 
 namespace Envoy {
 namespace Http {
-namespace AccessLog {
-
-class MockInstance : public Instance {
-public:
-  MockInstance();
-  ~MockInstance();
-
-  // Http::AccessLog::Instance
-  MOCK_METHOD3(log, void(const Http::HeaderMap* request_headers,
-                         const Http::HeaderMap* response_headers, const RequestInfo& request_info));
-};
-
-class MockRequestInfo : public RequestInfo {
-public:
-  MockRequestInfo();
-  ~MockRequestInfo();
-
-  // Http::AccessLog::RequestInfo
-  MOCK_METHOD1(setResponseFlag, void(ResponseFlag response_flag));
-  MOCK_METHOD1(onUpstreamHostSelected, void(Upstream::HostDescriptionConstSharedPtr host));
-  MOCK_CONST_METHOD0(startTime, SystemTime());
-  MOCK_CONST_METHOD0(requestReceivedDuration, std::chrono::microseconds());
-  MOCK_METHOD1(requestReceivedDuration, void(MonotonicTime time));
-  MOCK_CONST_METHOD0(responseReceivedDuration, std::chrono::microseconds());
-  MOCK_METHOD1(responseReceivedDuration, void(MonotonicTime time));
-  MOCK_CONST_METHOD0(bytesReceived, uint64_t());
-  MOCK_CONST_METHOD0(protocol, Protocol());
-  MOCK_METHOD1(protocol, void(Protocol protocol));
-  MOCK_CONST_METHOD0(responseCode, Optional<uint32_t>&());
-  MOCK_CONST_METHOD0(bytesSent, uint64_t());
-  MOCK_CONST_METHOD0(duration, std::chrono::microseconds());
-  MOCK_CONST_METHOD1(getResponseFlag, bool(Http::AccessLog::ResponseFlag));
-  MOCK_CONST_METHOD0(upstreamHost, Upstream::HostDescriptionConstSharedPtr());
-  MOCK_CONST_METHOD0(healthCheck, bool());
-  MOCK_METHOD1(healthCheck, void(bool is_hc));
-  MOCK_CONST_METHOD0(getDownstreamAddress, const std::string&());
-
-  std::shared_ptr<testing::NiceMock<Upstream::MockHostDescription>> host_{
-      new testing::NiceMock<Upstream::MockHostDescription>()};
-  SystemTime start_time_;
-  std::chrono::microseconds request_received_duration_;
-  std::chrono::microseconds response_received_duration_;
-};
-
-} // namespace AccessLog
 
 class MockConnectionManagerConfig : public ConnectionManagerConfig {
 public:
@@ -241,9 +197,8 @@ public:
 class MockStreamFilterCallbacksBase {
 public:
   Event::MockDispatcher dispatcher_;
-  testing::NiceMock<AccessLog::MockRequestInfo> request_info_;
+  testing::NiceMock<RequestInfo::MockRequestInfo> request_info_;
   std::shared_ptr<Router::MockRoute> route_;
-  std::string downstream_address_;
 };
 
 class MockStreamDecoderFilterCallbacks : public StreamDecoderFilterCallbacks,
@@ -259,9 +214,9 @@ public:
   MOCK_METHOD0(route, Router::RouteConstSharedPtr());
   MOCK_METHOD0(clearRouteCache, void());
   MOCK_METHOD0(streamId, uint64_t());
-  MOCK_METHOD0(requestInfo, Http::AccessLog::RequestInfo&());
+  MOCK_METHOD0(requestInfo, RequestInfo::RequestInfo&());
   MOCK_METHOD0(activeSpan, Tracing::Span&());
-  MOCK_METHOD0(downstreamAddress, const std::string&());
+  MOCK_METHOD0(tracingConfig, Tracing::Config&());
   MOCK_METHOD0(onDecoderFilterAboveWriteBufferHighWatermark, void());
   MOCK_METHOD0(onDecoderFilterBelowWriteBufferLowWatermark, void());
   MOCK_METHOD1(addDownstreamWatermarkCallbacks, void(DownstreamWatermarkCallbacks&));
@@ -285,6 +240,7 @@ public:
   Buffer::InstancePtr buffer_;
   std::list<DownstreamWatermarkCallbacks*> callbacks_{};
   testing::NiceMock<Tracing::MockSpan> active_span_;
+  testing::NiceMock<Tracing::MockConfig> tracing_config_;
 };
 
 class MockStreamEncoderFilterCallbacks : public StreamEncoderFilterCallbacks,
@@ -300,9 +256,9 @@ public:
   MOCK_METHOD0(route, Router::RouteConstSharedPtr());
   MOCK_METHOD0(clearRouteCache, void());
   MOCK_METHOD0(streamId, uint64_t());
-  MOCK_METHOD0(requestInfo, Http::AccessLog::RequestInfo&());
+  MOCK_METHOD0(requestInfo, RequestInfo::RequestInfo&());
   MOCK_METHOD0(activeSpan, Tracing::Span&());
-  MOCK_METHOD0(downstreamAddress, const std::string&());
+  MOCK_METHOD0(tracingConfig, Tracing::Config&());
   MOCK_METHOD0(onEncoderFilterAboveWriteBufferHighWatermark, void());
   MOCK_METHOD0(onEncoderFilterBelowWriteBufferLowWatermark, void());
   MOCK_METHOD1(setEncoderBufferLimit, void(uint32_t));
@@ -315,6 +271,7 @@ public:
 
   Buffer::InstancePtr buffer_;
   testing::NiceMock<Tracing::MockSpan> active_span_;
+  testing::NiceMock<Tracing::MockConfig> tracing_config_;
 };
 
 class MockStreamDecoderFilter : public StreamDecoderFilter {
@@ -457,7 +414,7 @@ public:
   MOCK_METHOD1(addStreamDecoderFilter, void(Http::StreamDecoderFilterSharedPtr filter));
   MOCK_METHOD1(addStreamEncoderFilter, void(Http::StreamEncoderFilterSharedPtr filter));
   MOCK_METHOD1(addStreamFilter, void(Http::StreamFilterSharedPtr filter));
-  MOCK_METHOD1(addAccessLogHandler, void(Http::AccessLog::InstanceSharedPtr handler));
+  MOCK_METHOD1(addAccessLogHandler, void(AccessLog::InstanceSharedPtr handler));
 };
 
 class MockDownstreamWatermarkCallbacks : public DownstreamWatermarkCallbacks {
@@ -486,7 +443,9 @@ public:
   ~MockInstance();
 
   // Http::ConnectionPool::Instance
+  MOCK_CONST_METHOD0(protocol, Http::Protocol());
   MOCK_METHOD1(addDrainedCallback, void(DrainedCb cb));
+  MOCK_METHOD0(closeConnections, void());
   MOCK_METHOD2(newStream, Cancellable*(Http::StreamDecoder& response_decoder,
                                        Http::ConnectionPool::Callbacks& callbacks));
 

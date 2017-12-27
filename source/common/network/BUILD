@@ -23,6 +23,9 @@ envoy_cc_library(
     name = "cidr_range_lib",
     srcs = ["cidr_range.cc"],
     hdrs = ["cidr_range.h"],
+    external_deps = [
+        "envoy_address",
+    ],
     deps = [
         ":address_lib",
         ":utility_lib",
@@ -40,8 +43,10 @@ envoy_cc_library(
     deps = [
         ":address_lib",
         ":filter_manager_lib",
+        ":raw_buffer_socket_lib",
         ":utility_lib",
         "//include/envoy/common:optional",
+        "//include/envoy/event:dispatcher_interface",
         "//include/envoy/event:timer_interface",
         "//include/envoy/network:connection_interface",
         "//include/envoy/network:filter_interface",
@@ -51,7 +56,6 @@ envoy_cc_library(
         "//source/common/common:empty_string",
         "//source/common/common:enum_to_int",
         "//source/common/common:logger_lib",
-        "//source/common/event:dispatcher_includes",
         "//source/common/event:libevent_lib",
     ],
 )
@@ -129,6 +133,19 @@ envoy_cc_library(
         "//source/common/event:dispatcher_includes",
         "//source/common/event:libevent_lib",
         "//source/common/ssl:connection_lib",
+    ],
+)
+
+envoy_cc_library(
+    name = "raw_buffer_socket_lib",
+    srcs = ["raw_buffer_socket.cc"],
+    hdrs = ["raw_buffer_socket.h"],
+    external_deps = ["envoy_base"],
+    deps = [
+        ":utility_lib",
+        "//include/envoy/network:transport_socket_interface",
+        "//source/common/buffer:buffer_lib",
+        "//source/common/common:empty_string",
     ],
 )
 

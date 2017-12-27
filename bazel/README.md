@@ -3,11 +3,11 @@
 ## Production environments
 
 To build Envoy with Bazel in a production environment, where the [Envoy
-dependencies](https://envoyproxy.github.io/envoy/install/requirements.html) are typically
+dependencies](https://www.envoyproxy.io/docs/envoy/latest/install/requirements) are typically
 independently sourced, the following steps should be followed:
 
-1. [Install Bazel](https://bazel.build/versions/master/docs/install.html) in your environment.
-2. Configure, build and/or install the [Envoy dependencies](https://envoyproxy.github.io/envoy/install/requirements.html).
+1. Install the latest version of [Bazel](https://bazel.build/versions/master/docs/install.html) in your environment.
+2. Configure, build and/or install the [Envoy dependencies](https://www.envoyproxy.io/docs/envoy/latest/install/requirements).
 3. Configure a Bazel [WORKSPACE](https://bazel.build/versions/master/docs/be/workspace.html)
    to point Bazel at the Envoy dependencies. An example is provided in the CI Docker image
    [WORKSPACE](https://github.com/envoyproxy/envoy/blob/master/ci/WORKSPACE) and corresponding
@@ -24,13 +24,18 @@ dependencies are provided. These are provided as is, they are only suitable for 
 testing purposes. The specific versions of the Envoy dependencies used in this build may not be
 up-to-date with the latest security patches.
 
-1. [Install Bazel](https://bazel.build/versions/master/docs/install.html) in your environment.
-2.  Install external dependencies libtoolize, cmake, and realpath libraries separately.
+1. Install the latest version of [Bazel](https://bazel.build/versions/master/docs/install.html) in your environment.
+2. Install external dependencies libtool, cmake, and realpath libraries separately.
 On Ubuntu, run the following commands:
 ```
- apt-get install libtoolize
+ apt-get install libtool
  apt-get install cmake
  apt-get install realpath
+```
+
+On Fedora (maybe also other red hat distros), run the following:
+```
+dnf install cmake libtool libstdc++
 ```
 
 On OS X, you'll need to install several dependencies. This can be accomplished via Homebrew:
@@ -47,7 +52,7 @@ brew install automake
 Envoy compiles and passes tests with the version of clang installed by XCode 8.3.3:
 Apple LLVM version 8.1.0 (clang-802.0.42).
 
-3.  Install Golang on your machine. This is required as part of building [BoringSSL](https://boringssl.googlesource.com/boringssl/+/HEAD/BUILDING.md)
+3. Install Golang on your machine. This is required as part of building [BoringSSL](https://boringssl.googlesource.com/boringssl/+/HEAD/BUILDING.md)
 and also for [Buildifer](https://github.com/bazelbuild/buildtools) which is used for formatting bazel BUILD files.
 4. `bazel fetch //source/...` to fetch and build all external dependencies. This may take some time.
 5. `bazel build //source/exe:envoy-static` from the Envoy source directory.
@@ -72,9 +77,9 @@ unprefixed, e.g. `as` instead of `x86_64-linux-gnu-as`.
 
 ## Supported compiler versions
 
-Though Envoy has been run in production compiled with GCC 4.9 extensively, we now strongly
-recommend GCC >= 5 due to known issues with std::string thread safety. Clang >= 4.0 is also known
-to work.
+Though Envoy has been run in production compiled with GCC 4.9 extensively, we now require
+GCC >= 5 due to known issues with std::string thread safety and C++14 support. Clang >= 4.0 is also
+known to work.
 
 ## Clang STL debug symbols
 
@@ -141,7 +146,7 @@ bazel test //test/common/http:async_client_impl_test --cache_test_results=no
 
 Bazel will by default run all tests inside a sandbox, which disallows access to the
 local filesystem. If you need to break out of the sandbox (for example to run under a
-local script or tool with [`--run_under`](https://bazel.build/versions/master/docs/bazel-user-manual.html#flag--run_under)),
+local script or tool with [`--run_under`](https://docs.bazel.build/versions/master/user-manual.html#flag--run_under)),
 you can run the test with `--strategy=TestRunner=standalone`, e.g.:
 
 ```
@@ -150,9 +155,9 @@ bazel test //test/common/http:async_client_impl_test --strategy=TestRunner=stand
 # Stack trace symbol resolution
 
 Envoy can produce backtraces on demand and from assertions and other fatal
-actions like segfaults.  The stack traces written in the log or to stderr contain
-addresses rather than resolved symbols.  The `tools/stack_decode.py` script exists
-to process the output and do symbol resolution to make the stack traces useful.  Any
+actions like segfaults. The stack traces written in the log or to stderr contain
+addresses rather than resolved symbols. The `tools/stack_decode.py` script exists
+to process the output and do symbol resolution to make the stack traces useful. Any
 log lines not relevant to the backtrace capability are passed through the script unchanged
 (it acts like a filter).
 
@@ -173,9 +178,9 @@ You will need to use either a `dbg` build type or the `opt` build type to get sy
 information in the binaries.
 
 By default main.cc will install signal handlers to print backtraces at the
-location where a fatal signal occurred.  The signal handler will re-raise the
+location where a fatal signal occurred. The signal handler will re-raise the
 fatal signal with the default handler so a core file will still be dumped after
-the stack trace is logged.  To inhibit this behavior use
+the stack trace is logged. To inhibit this behavior use
 `--define=signal_trace=disabled` on the Bazel command line. No signal handlers will
 be installed.
 
@@ -191,7 +196,7 @@ binaries will not include debugging symbols and GDB will not be very useful.
 # Additional Envoy build and test options
 
 In general, there are 3 [compilation
-modes](https://bazel.build/versions/master/docs/bazel-user-manual.html#flag--compilation_mode)
+modes](https://docs.bazel.build/versions/master/user-manual.html#flag--compilation_mode)
 that Bazel supports:
 
 * `fastbuild`: `-O0`, aimed at developer speed (default).
@@ -247,9 +252,9 @@ on the Bazel command line.
 
 The default maximum number of stats in shared memory, and the default
 maximum length of a cluster/route config/listener name, can be
-overriden at compile-time by defining `ENVOY_DEFAULT_MAX_STATS` and
+overridden at compile-time by defining `ENVOY_DEFAULT_MAX_STATS` and
 `ENVOY_DEFAULT_MAX_OBJ_NAME_LENGTH`, respectively, to the desired
-value.  For example:
+value. For example:
 
 ```
 bazel build --copts=-DENVOY_DEFAULT_MAX_STATS=32768 --copts=-DENVOY_DEFAULT_MAX_OBJ_NAME_LENGTH=150 //source/exe:envoy-static

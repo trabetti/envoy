@@ -10,27 +10,53 @@
 namespace Envoy {
 namespace Upstream {
 
-RingHashLoadBalancer::RingHashLoadBalancer(HostSet& host_set, ClusterStats& stats,
-                                           Runtime::Loader& runtime,
-                                           Runtime::RandomGenerator& random)
-    : host_set_(host_set), stats_(stats), runtime_(runtime), random_(random) {
-  host_set_.addMemberUpdateCb([this](const std::vector<HostSharedPtr>&,
-                                     const std::vector<HostSharedPtr>&) -> void { refresh(); });
+RingHashLoadBalancer::RingHashLoadBalancer(
+    PrioritySet& priority_set, ClusterStats& stats, Runtime::Loader& runtime,
+    Runtime::RandomGenerator& random,
+    const Optional<envoy::api::v2::Cluster::RingHashLbConfig>& config)
+    : LoadBalancerBase(priority_set, stats, runtime, random), config_(config),
+      factory_(new LoadBalancerFactoryImpl(stats, random)) {
+  // Make sure we correctly return nullptr for any early chooseHost() calls.
+  factory_->current_ring_ = std::make_shared<Ring>(config_, std::vector<HostSharedPtr>{});
+}
+
+void RingHashLoadBalancer::initialize() {
+  // TODO(mattklein123): In the future, once initialized and the initial ring is built, it would be
+  // better to use a background thread for computing ring updates. This has the substantial benefit
+  // that if the ring computation thread falls behind, host set updates can be trivially collapsed.
+  // I will look into doing this in a follow up. Doing everything using a background thread heavily
+  // complicated initialization as the load balancer would need its own initialized callback. I
+  // think the synchronous/asynchronous split is probably the best option.
+  priority_set_.addMemberUpdateCb([this](uint32_t, const std::vector<HostSharedPtr>&,
+                                         const std::vector<HostSharedPtr>&) -> void { refresh(); });
 
   refresh();
 }
 
-HostConstSharedPtr RingHashLoadBalancer::chooseHost(LoadBalancerContext* context) {
-  if (LoadBalancerUtility::isGlobalPanic(host_set_, runtime_)) {
+HostConstSharedPtr
+RingHashLoadBalancer::LoadBalancerImpl::chooseHost(LoadBalancerContext* context) {
+  if (global_panic_) {
     stats_.lb_healthy_panic_.inc();
-    return all_hosts_ring_.chooseHost(context, random_);
-  } else {
-    return healthy_hosts_ring_.chooseHost(context, random_);
   }
+  return ring_->chooseHost(context, random_);
+}
+
+LoadBalancerPtr RingHashLoadBalancer::LoadBalancerFactoryImpl::create() {
+  // We must protect current_ring_ via a RW lock since it is accessed and written to by multiple
+  // threads. All complex processing happens outside of locking however.
+  RingConstSharedPtr ring_to_use;
+  bool global_panic_to_use;
+  {
+    std::shared_lock<std::shared_timed_mutex> lock(mutex_);
+    ring_to_use = current_ring_;
+    global_panic_to_use = global_panic_;
+  }
+
+  return std::make_unique<LoadBalancerImpl>(stats_, random_, ring_to_use, global_panic_to_use);
 }
 
 HostConstSharedPtr RingHashLoadBalancer::Ring::chooseHost(LoadBalancerContext* context,
-                                                          Runtime::RandomGenerator& random) {
+                                                          Runtime::RandomGenerator& random) const {
   if (ring_.empty()) {
     return nullptr;
   }
@@ -76,10 +102,9 @@ HostConstSharedPtr RingHashLoadBalancer::Ring::chooseHost(LoadBalancerContext* c
   }
 }
 
-void RingHashLoadBalancer::Ring::create(Runtime::Loader& runtime,
-                                        const std::vector<HostSharedPtr>& hosts) {
+RingHashLoadBalancer::Ring::Ring(const Optional<envoy::api::v2::Cluster::RingHashLbConfig>& config,
+                                 const std::vector<HostSharedPtr>& hosts) {
   ENVOY_LOG(trace, "ring hash: building ring");
-  ring_.clear();
   if (hosts.empty()) {
     return;
   }
@@ -92,7 +117,9 @@ void RingHashLoadBalancer::Ring::create(Runtime::Loader& runtime,
   //       standpoint and duplicates the regeneration computation. In the future we might want
   //       to generate the rings centrally and then just RCU them out to each thread. This is
   //       sufficient for getting started.
-  uint64_t min_ring_size = runtime.snapshot().getInteger("upstream.ring_hash.min_ring_size", 1024);
+  const uint64_t min_ring_size =
+      config.valid() ? PROTOBUF_GET_WRAPPED_OR_DEFAULT(config.value(), minimum_ring_size, 1024)
+                     : 1024;
 
   uint64_t hashes_per_host = 1;
   if (hosts.size() < min_ring_size) {
@@ -102,14 +129,18 @@ void RingHashLoadBalancer::Ring::create(Runtime::Loader& runtime,
     }
   }
 
-  ENVOY_LOG(trace, "ring hash: min_ring_size={} hashes_per_host={}", min_ring_size,
-            hashes_per_host);
+  ENVOY_LOG(info, "ring hash: min_ring_size={} hashes_per_host={}", min_ring_size, hashes_per_host);
   ring_.reserve(hosts.size() * hashes_per_host);
+
+  const bool use_std_hash =
+      config.valid()
+          ? PROTOBUF_GET_WRAPPED_OR_DEFAULT(config.value().deprecated_v1(), use_std_hash, true)
+          : true;
   for (const auto& host : hosts) {
     for (uint64_t i = 0; i < hashes_per_host; i++) {
-      std::string hash_key(host->address()->asString() + "_" + std::to_string(i));
-      // TODO(danielhochman): convert to HashUtil::xxHash64 when we have a migration strategy.
-      uint64_t hash = std::hash<std::string>()(hash_key);
+      const std::string hash_key(host->address()->asString() + "_" + std::to_string(i));
+      const uint64_t hash =
+          use_std_hash ? std::hash<std::string>()(hash_key) : HashUtil::xxHash64(hash_key);
       ENVOY_LOG(trace, "ring hash: hash_key={} hash={}", hash_key, hash);
       ring_.push_back({hash, host});
     }
@@ -126,8 +157,23 @@ void RingHashLoadBalancer::Ring::create(Runtime::Loader& runtime,
 }
 
 void RingHashLoadBalancer::refresh() {
-  all_hosts_ring_.create(runtime_, host_set_.hosts());
-  healthy_hosts_ring_.create(runtime_, host_set_.healthyHosts());
+  // Note that we only compute global panic on host set refresh. Given that the runtime setting will
+  // rarely change, this is a reasonable compromise to avoid creating multiple rings when we only
+  // need to create one for LB.
+  RingConstSharedPtr new_ring;
+  bool new_global_panic;
+  const auto& host_set = chooseHostSet();
+  if (isGlobalPanic(host_set, runtime_)) {
+    new_ring = std::make_shared<Ring>(config_, host_set.hosts());
+    new_global_panic = true;
+  } else {
+    new_ring = std::make_shared<Ring>(config_, host_set.healthyHosts());
+    new_global_panic = false;
+  }
+
+  std::unique_lock<std::shared_timed_mutex> lock(factory_->mutex_);
+  factory_->current_ring_ = new_ring;
+  factory_->global_panic_ = new_global_panic;
 }
 
 } // namespace Upstream

@@ -10,12 +10,12 @@
 
 #include "common/common/assert.h"
 #include "common/common/enum_to_int.h"
+#include "common/config/filter_json.h"
 #include "common/http/codes.h"
 #include "common/http/header_map_impl.h"
 #include "common/http/headers.h"
 #include "common/http/utility.h"
-#include "common/json/config_schemas.h"
-#include "common/json/json_loader.h"
+#include "common/protobuf/utility.h"
 
 #include "server/config/network/http_connection_manager.h"
 
@@ -23,17 +23,15 @@ namespace Envoy {
 namespace Server {
 namespace Configuration {
 
-/**
- * Config registration for the health check filter. @see NamedHttpFilterConfigFactory.
- */
-HttpFilterFactoryCb HealthCheckFilterConfig::createFilterFactory(const Json::Object& config,
-                                                                 const std::string&,
-                                                                 FactoryContext& context) {
-  config.validateSchema(Json::Schema::HEALTH_CHECK_HTTP_FILTER_SCHEMA);
+HttpFilterFactoryCb
+HealthCheckFilterConfig::createFilter(const envoy::api::v2::filter::http::HealthCheck& proto_config,
+                                      const std::string&, FactoryContext& context) {
+  ASSERT(proto_config.has_pass_through_mode());
+  ASSERT(!proto_config.endpoint().empty());
 
-  bool pass_through_mode = config.getBoolean("pass_through_mode");
-  int64_t cache_time_ms = config.getInteger("cache_time_ms", 0);
-  std::string hc_endpoint = config.getString("endpoint");
+  const bool pass_through_mode = proto_config.pass_through_mode().value();
+  const int64_t cache_time_ms = PROTOBUF_GET_MS_OR_DEFAULT(proto_config, cache_time, 0);
+  const std::string hc_endpoint = proto_config.endpoint();
 
   if (!pass_through_mode && cache_time_ms) {
     throw EnvoyException("cache_time_ms must not be set when path_through_mode is disabled");
@@ -50,6 +48,25 @@ HttpFilterFactoryCb HealthCheckFilterConfig::createFilterFactory(const Json::Obj
     callbacks.addStreamFilter(Http::StreamFilterSharedPtr{
         new HealthCheckFilter(context, pass_through_mode, cache_manager, hc_endpoint)});
   };
+}
+
+/**
+ * Config registration for the health check filter. @see NamedHttpFilterConfigFactory.
+ */
+HttpFilterFactoryCb HealthCheckFilterConfig::createFilterFactory(const Json::Object& json_config,
+                                                                 const std::string& stats_prefix,
+                                                                 FactoryContext& context) {
+  envoy::api::v2::filter::http::HealthCheck proto_config;
+  Config::FilterJson::translateHealthCheckFilter(json_config, proto_config);
+  return createFilter(proto_config, stats_prefix, context);
+}
+
+HttpFilterFactoryCb
+HealthCheckFilterConfig::createFilterFactoryFromProto(const Protobuf::Message& proto_config,
+                                                      const std::string& stats_prefix,
+                                                      FactoryContext& context) {
+  return createFilter(dynamic_cast<const envoy::api::v2::filter::http::HealthCheck&>(proto_config),
+                      stats_prefix, context);
 }
 
 /**
@@ -131,8 +148,7 @@ void HealthCheckFilter::onComplete() {
   ASSERT(handling_);
   Http::HeaderMapPtr headers;
   if (context_.healthCheckFailed()) {
-    callbacks_->requestInfo().setResponseFlag(
-        Http::AccessLog::ResponseFlag::FailedLocalHealthCheck);
+    callbacks_->requestInfo().setResponseFlag(RequestInfo::ResponseFlag::FailedLocalHealthCheck);
     headers.reset(new Http::HeaderMapImpl{
         {Http::Headers::get().Status, std::to_string(enumToInt(Http::Code::ServiceUnavailable))}});
   } else {
@@ -142,8 +158,7 @@ void HealthCheckFilter::onComplete() {
     }
 
     if (!Http::CodeUtility::is2xx(enumToInt(final_status))) {
-      callbacks_->requestInfo().setResponseFlag(
-          Http::AccessLog::ResponseFlag::FailedLocalHealthCheck);
+      callbacks_->requestInfo().setResponseFlag(RequestInfo::ResponseFlag::FailedLocalHealthCheck);
     }
 
     headers.reset(new Http::HeaderMapImpl{

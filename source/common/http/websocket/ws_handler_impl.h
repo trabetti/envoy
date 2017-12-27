@@ -23,9 +23,9 @@ namespace WebSocket {
  * All data will be proxied back and forth between the two connections, without any
  * knowledge of the underlying WebSocket protocol.
  */
-class WsHandlerImpl : public Filter::TcpProxy {
+class WsHandlerImpl : public Envoy::Filter::TcpProxy {
 public:
-  WsHandlerImpl(HeaderMap& request_headers, const AccessLog::RequestInfo& request_info,
+  WsHandlerImpl(HeaderMap& request_headers, const RequestInfo::RequestInfo& request_info,
                 const Router::RouteEntry& route_entry, WsHandlerCallbacks& callbacks,
                 Upstream::ClusterManager& cluster_manager,
                 Network::ReadFilterCallbacks* read_callbacks);
@@ -33,11 +33,7 @@ public:
 protected:
   // Filter::TcpProxy
   const std::string& getUpstreamCluster() override { return route_entry_.clusterName(); }
-
-  void onInitFailure() override;
-  void onUpstreamHostReady() override;
-  void onConnectTimeoutError() override;
-  void onConnectionFailure() override;
+  void onInitFailure(UpstreamFailureReason failure_reason) override;
   void onConnectionSuccess() override;
 
 private:
@@ -47,7 +43,7 @@ private:
   };
 
   HeaderMap& request_headers_;
-  const AccessLog::RequestInfo& request_info_;
+  const RequestInfo::RequestInfo& request_info_;
   const Router::RouteEntry& route_entry_;
   WsHandlerCallbacks& ws_callbacks_;
   NullHttpConnectionCallbacks http_conn_callbacks_;

@@ -5,20 +5,18 @@
 
 #include "common/common/assert.h"
 #include "common/config/utility.h"
-#include "common/json/config_schemas.h"
 
 #include "fmt/format.h"
-
-// TODO(mattklein123): Graceful drain support.
 
 namespace Envoy {
 namespace Redis {
 
-ProxyFilterConfig::ProxyFilterConfig(const Json::Object& config, Upstream::ClusterManager& cm,
-                                     Stats::Scope& scope)
-    : Json::Validator(config, Json::Schema::REDIS_PROXY_NETWORK_FILTER_SCHEMA),
-      cluster_name_(config.getString("cluster_name")),
-      stat_prefix_(fmt::format("redis.{}.", config.getString("stat_prefix"))),
+ProxyFilterConfig::ProxyFilterConfig(const envoy::api::v2::filter::network::RedisProxy& config,
+                                     Upstream::ClusterManager& cm, Stats::Scope& scope,
+                                     const Network::DrainDecision& drain_decision,
+                                     Runtime::Loader& runtime)
+    : drain_decision_(drain_decision), runtime_(runtime), cluster_name_(config.cluster()),
+      stat_prefix_(fmt::format("redis.{}.", config.stat_prefix())),
       stats_(generateStats(stat_prefix_, scope)) {
   Config::Utility::checkCluster("redis", cluster_name_, cm);
 }
@@ -32,22 +30,22 @@ ProxyFilter::ProxyFilter(DecoderFactory& factory, EncoderPtr&& encoder,
                          CommandSplitter::Instance& splitter, ProxyFilterConfigSharedPtr config)
     : decoder_(factory.create(*this)), encoder_(std::move(encoder)), splitter_(splitter),
       config_(config) {
-  config_->stats().downstream_cx_total_.inc();
-  config_->stats().downstream_cx_active_.inc();
+  config_->stats_.downstream_cx_total_.inc();
+  config_->stats_.downstream_cx_active_.inc();
 }
 
 ProxyFilter::~ProxyFilter() {
   ASSERT(pending_requests_.empty());
-  config_->stats().downstream_cx_active_.dec();
+  config_->stats_.downstream_cx_active_.dec();
 }
 
 void ProxyFilter::initializeReadFilterCallbacks(Network::ReadFilterCallbacks& callbacks) {
   callbacks_ = &callbacks;
   callbacks_->connection().addConnectionCallbacks(*this);
-  callbacks_->connection().setConnectionStats({config_->stats().downstream_cx_rx_bytes_total_,
-                                               config_->stats().downstream_cx_rx_bytes_buffered_,
-                                               config_->stats().downstream_cx_tx_bytes_total_,
-                                               config_->stats().downstream_cx_tx_bytes_buffered_,
+  callbacks_->connection().setConnectionStats({config_->stats_.downstream_cx_rx_bytes_total_,
+                                               config_->stats_.downstream_cx_rx_bytes_buffered_,
+                                               config_->stats_.downstream_cx_tx_bytes_total_,
+                                               config_->stats_.downstream_cx_tx_bytes_buffered_,
                                                nullptr});
 }
 
@@ -89,6 +87,13 @@ void ProxyFilter::onResponse(PendingRequest& request, RespValuePtr&& value) {
   if (encoder_buffer_.length() > 0) {
     callbacks_->connection().write(encoder_buffer_);
   }
+
+  // Check for drain close only if there are no pending responses.
+  if (pending_requests_.empty() && config_->drain_decision_.drainClose() &&
+      config_->runtime_.snapshot().featureEnabled(config_->redis_drain_close_runtime_key_, 100)) {
+    config_->stats_.downstream_cx_drain_close_.inc();
+    callbacks_->connection().close(Network::ConnectionCloseType::FlushWrite);
+  }
 }
 
 Network::FilterStatus ProxyFilter::onData(Buffer::Instance& data) {
@@ -96,7 +101,7 @@ Network::FilterStatus ProxyFilter::onData(Buffer::Instance& data) {
     decoder_->decode(data);
     return Network::FilterStatus::Continue;
   } catch (ProtocolError&) {
-    config_->stats().downstream_cx_protocol_error_.inc();
+    config_->stats_.downstream_cx_protocol_error_.inc();
     RespValue error;
     error.type(RespType::Error);
     error.asString() = "downstream protocol error";
@@ -108,12 +113,12 @@ Network::FilterStatus ProxyFilter::onData(Buffer::Instance& data) {
 }
 
 ProxyFilter::PendingRequest::PendingRequest(ProxyFilter& parent) : parent_(parent) {
-  parent.config_->stats().downstream_rq_total_.inc();
-  parent.config_->stats().downstream_rq_active_.inc();
+  parent.config_->stats_.downstream_rq_total_.inc();
+  parent.config_->stats_.downstream_rq_active_.inc();
 }
 
 ProxyFilter::PendingRequest::~PendingRequest() {
-  parent_.config_->stats().downstream_rq_active_.dec();
+  parent_.config_->stats_.downstream_rq_active_.dec();
 }
 
 } // namespace Redis

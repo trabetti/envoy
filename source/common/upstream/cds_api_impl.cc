@@ -2,9 +2,14 @@
 
 #include <string>
 
+#include "common/common/cleanup.h"
+#include "common/config/resources.h"
 #include "common/config/subscription_factory.h"
 #include "common/config/utility.h"
+#include "common/protobuf/utility.h"
 #include "common/upstream/cds_subscription.h"
+
+#include "api/cds.pb.validate.h"
 
 namespace Envoy {
 namespace Upstream {
@@ -37,20 +42,25 @@ CdsApiImpl::CdsApiImpl(const envoy::api::v2::ConfigSource& cds_config,
 }
 
 void CdsApiImpl::onConfigUpdate(const ResourceVector& resources) {
+  cm_.adsMux().pause(Config::TypeUrl::get().ClusterLoadAssignment);
+  Cleanup eds_resume([this] { cm_.adsMux().resume(Config::TypeUrl::get().ClusterLoadAssignment); });
+  for (const auto& cluster : resources) {
+    MessageUtil::validate(cluster);
+  }
   // We need to keep track of which clusters we might need to remove.
   ClusterManager::ClusterInfoMap clusters_to_remove = cm_.clusters();
   for (auto& cluster : resources) {
     const std::string cluster_name = cluster.name();
     clusters_to_remove.erase(cluster_name);
     if (cm_.addOrUpdatePrimaryCluster(cluster)) {
-      ENVOY_LOG(info, "cds: add/update cluster '{}'", cluster_name);
+      ENVOY_LOG(debug, "cds: add/update cluster '{}'", cluster_name);
     }
   }
 
   for (auto cluster : clusters_to_remove) {
     const std::string cluster_name = cluster.first;
     if (cm_.removePrimaryCluster(cluster_name)) {
-      ENVOY_LOG(info, "cds: remove cluster '{}'", cluster_name);
+      ENVOY_LOG(debug, "cds: remove cluster '{}'", cluster_name);
     }
   }
 

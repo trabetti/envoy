@@ -44,6 +44,20 @@ public:
   static Address::InstanceConstSharedPtr resolveUrl(const std::string& url);
 
   /**
+   * Match a URL to the TCP scheme
+   * @param url supplies the URL to match.
+   * @return bool true if the URL matches the TCP scheme, false otherwise.
+   */
+  static bool urlIsTcpScheme(const std::string& url);
+
+  /**
+   * Match a URL to the Unix scheme
+   * @param url supplies the Unix to match.
+   * @return bool true if the URL matches the Unix scheme, false otherwise.
+   */
+  static bool urlIsUnixScheme(const std::string& url);
+
+  /**
    * Parses the host from a TCP URL
    * @param the URL to parse host from
    * @return std::string the parsed host
@@ -69,7 +83,7 @@ public:
 
   /**
    * Parse an internet host address (IPv4 or IPv6) AND port, and create an Instance from it. Throws
-   * EnvoyException if unable to parse the address.  This is needed when a shared pointer is needed
+   * EnvoyException if unable to parse the address. This is needed when a shared pointer is needed
    * but only a raw instance is available.
    * @param Address::Ip& to be copied to the new instance.
    * @return pointer to the Instance.
@@ -77,7 +91,7 @@ public:
   static Address::InstanceConstSharedPtr copyInternetAddressAndPort(const Address::Ip& ip);
 
   /**
-   * Create a new Intance from an internet host address (IPv4 or IPv6) and port.
+   * Create a new Instance from an internet host address (IPv4 or IPv6) and port.
    * @param ip_addr string to be parsed as an internet address and port. Examples:
    *        - "1.2.3.4:80"
    *        - "[1234:5678::9]:443"
@@ -98,7 +112,7 @@ public:
    * Determine whether this is an internal (RFC1918) address.
    * @return bool the address is an RFC1918 address.
    */
-  static bool isInternalAddress(const char* address);
+  static bool isInternalAddress(const Address::Instance& address);
 
   /**
    * Check if address is loopback address.

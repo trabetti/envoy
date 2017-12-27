@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import fileinput
 import re
 import os
 import os.path
@@ -8,7 +9,8 @@ import sys
 
 EXCLUDED_PREFIXES = ("./generated/", "./thirdparty/", "./build", "./.git/",
                      "./bazel-", "./bazel/external")
-SUFFIXES = (".cc", ".h", "BUILD")
+SUFFIXES = (".cc", ".h", "BUILD", ".md", ".rst")
+DOCS_SUFFIX = (".md", ".rst")
 
 # Files in these paths can make reference to protobuf stuff directly
 GOOGLE_PROTOBUF_WHITELIST = ('ci/prebuilt', 'source/common/protobuf')
@@ -71,11 +73,25 @@ def checkProtobufExternalDeps(file_path):
 
 def isBuildFile(file_path):
   basename = os.path.basename(file_path)
-  if basename in ["BUILD", "BUILD.bazel"]:
-    return True
-  if basename.endswith(".BUILD"):
+  if basename in {"BUILD", "BUILD.bazel"} or basename.endswith(".BUILD"):
     return True
   return False
+
+
+def checkFileContents(file_path):
+  with open(file_path) as f:
+    text = f.read()
+    if re.search('\.  ', text, re.MULTILINE):
+      printError("%s has over-enthusiastic spaces" % file_path)
+      return False
+  return True
+
+
+def fixFileContents(file_path):
+  for line in fileinput.input(file_path, inplace=True):
+    # Strip double space after '.'  This may prove overenthusiastic and need to
+    # be restricted to comments and metadata files but works for now.
+    print "%s" % (line.replace('.  ', '. ').rstrip())
 
 
 def checkFilePath(file_path):
@@ -87,6 +103,10 @@ def checkFilePath(file_path):
                  (file_path, BUILDIFIER_PATH, file_path)) != 0:
       printError("buildifier check failed for file: %s" % file_path)
     checkProtobufExternalDepsBuild(file_path)
+    return
+  checkFileContents(file_path)
+
+  if file_path.endswith(DOCS_SUFFIX):
     return
   checkNamespace(file_path)
   checkProtobufExternalDeps(file_path)
@@ -101,11 +121,14 @@ def checkFilePath(file_path):
 
 
 def fixFilePath(file_path):
-  if os.path.basename(file_path) == "BUILD":
+  if isBuildFile(file_path):
     if os.system("%s %s %s" % (ENVOY_BUILD_FIXER_PATH, file_path, file_path)) != 0:
       printError("envoy_build_fixer rewrite failed for file: %s" % file_path)
     if os.system("%s -mode=fix %s" % (BUILDIFIER_PATH, file_path)) != 0:
       printError("buildifier rewrite failed for file: %s" % file_path)
+    return
+  fixFileContents(file_path)
+  if file_path.endswith(DOCS_SUFFIX):
     return
   if not checkNamespace(file_path) or not checkProtobufExternalDepsBuild(
       file_path) or not checkProtobufExternalDeps(file_path):

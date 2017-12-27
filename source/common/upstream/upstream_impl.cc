@@ -65,7 +65,22 @@ HostImpl::createConnection(Event::Dispatcher& dispatcher, const ClusterInfo& clu
   return connection;
 }
 
-void HostImpl::weight(uint32_t new_weight) { weight_ = std::max(1U, std::min(100U, new_weight)); }
+void HostImpl::weight(uint32_t new_weight) { weight_ = std::max(1U, std::min(128U, new_weight)); }
+
+HostSet& PrioritySetImpl::getOrCreateHostSet(uint32_t priority) {
+  if (host_sets_.size() < priority + 1) {
+    for (size_t i = host_sets_.size(); i <= priority; ++i) {
+      HostSetImplPtr host_set = createHostSet(i);
+      host_set->addMemberUpdateCb([this](uint32_t priority,
+                                         const std::vector<HostSharedPtr>& hosts_added,
+                                         const std::vector<HostSharedPtr>& hosts_removed) {
+        runUpdateCallbacks(priority, hosts_added, hosts_removed);
+      });
+      host_sets_.push_back(std::move(host_set));
+    }
+  }
+  return *host_sets_[priority];
+}
 
 ClusterStats ClusterInfoImpl::generateStats(Stats::Scope& scope) {
   return {ALL_CLUSTER_STATS(POOL_COUNTER(scope), POOL_GAUGE(scope), POOL_HISTOGRAM(scope))};
@@ -93,7 +108,9 @@ ClusterInfoImpl::ClusterInfoImpl(const envoy::api::v2::Cluster& config,
       http2_settings_(Http::Utility::parseHttp2Settings(config.http2_protocol_options())),
       resource_managers_(config, runtime, name_),
       maintenance_mode_runtime_key_(fmt::format("upstream.maintenance_mode.{}", name_)),
-      source_address_(getSourceAddress(config, source_address)), added_via_api_(added_via_api),
+      source_address_(getSourceAddress(config, source_address)),
+      lb_ring_hash_config_(envoy::api::v2::Cluster::RingHashLbConfig(config.ring_hash_lb_config())),
+      added_via_api_(added_via_api),
       lb_subset_(LoadBalancerSubsetInfoImpl(config.lb_subset_config())) {
   ssl_ctx_ = nullptr;
   if (config.has_tls_context()) {
@@ -214,7 +231,26 @@ ClusterImplBase::ClusterImplBase(const envoy::api::v2::Cluster& cluster,
                                  Runtime::Loader& runtime, Stats::Store& stats,
                                  Ssl::ContextManager& ssl_context_manager, bool added_via_api)
     : runtime_(runtime), info_(new ClusterInfoImpl(cluster, source_address, runtime, stats,
-                                                   ssl_context_manager, added_via_api)) {}
+                                                   ssl_context_manager, added_via_api)) {
+  // Create the default (empty) priority set before registering callbacks to
+  // avoid getting an update the first time it is accessed.
+  priority_set_.getOrCreateHostSet(0);
+  priority_set_.addMemberUpdateCb([this](uint32_t, const std::vector<HostSharedPtr>& hosts_added,
+                                         const std::vector<HostSharedPtr>& hosts_removed) {
+    if (!hosts_added.empty() || !hosts_removed.empty()) {
+      info_->stats().membership_change_.inc();
+    }
+
+    uint32_t healthy_hosts = 0;
+    uint32_t hosts = 0;
+    for (const auto& host_set : prioritySet().hostSetsPerPriority()) {
+      hosts += host_set->hosts().size();
+      healthy_hosts += host_set->healthyHosts().size();
+    }
+    info_->stats().membership_total_.set(hosts);
+    info_->stats().membership_healthy_.set(healthy_hosts);
+  });
+}
 
 HostVectorConstSharedPtr
 ClusterImplBase::createHealthyHostList(const std::vector<HostSharedPtr>& hosts) {
@@ -262,24 +298,54 @@ ResourceManager& ClusterInfoImpl::resourceManager(ResourcePriority priority) con
   return *resource_managers_.managers_[enumToInt(priority)];
 }
 
-void ClusterImplBase::blockHcUpdates(bool block) {
-  ASSERT(block_hc_updates_ == !block);
-  block_hc_updates_ = block;
+void ClusterImplBase::initialize(std::function<void()> callback) {
+  ASSERT(!initialization_started_);
+  ASSERT(initialization_complete_callback_ == nullptr);
+  initialization_complete_callback_ = callback;
+  startPreInit();
+}
 
-  if (!block_hc_updates_) {
-    reloadHealthyHosts();
+void ClusterImplBase::onPreInitComplete() {
+  // Protect against multiple calls.
+  if (initialization_started_) {
+    return;
+  }
+  initialization_started_ = true;
+
+  if (health_checker_ && pending_initialize_health_checks_ == 0) {
+    for (auto& host_set : prioritySet().hostSetsPerPriority()) {
+      pending_initialize_health_checks_ += host_set->hosts().size();
+    }
+
+    // TODO(mattklein123): Remove this callback when done.
+    health_checker_->addHostCheckCompleteCb([this](HostSharedPtr, bool) -> void {
+      if (pending_initialize_health_checks_ > 0 && --pending_initialize_health_checks_ == 0) {
+        finishInitialization();
+      }
+    });
+  }
+
+  if (pending_initialize_health_checks_ == 0) {
+    finishInitialization();
   }
 }
 
-void ClusterImplBase::runUpdateCallbacks(const std::vector<HostSharedPtr>& hosts_added,
-                                         const std::vector<HostSharedPtr>& hosts_removed) {
-  if (!hosts_added.empty() || !hosts_removed.empty()) {
-    info_->stats().membership_change_.inc();
+void ClusterImplBase::finishInitialization() {
+  ASSERT(initialization_complete_callback_ != nullptr);
+  ASSERT(initialization_started_);
+
+  // Snap a copy of the completion callback so that we can set it to nullptr to unblock
+  // reloadHealthyHosts(). See that function for more info on why we do this.
+  auto snapped_callback = initialization_complete_callback_;
+  initialization_complete_callback_ = nullptr;
+
+  if (health_checker_ != nullptr) {
+    reloadHealthyHosts();
   }
 
-  info_->stats().membership_healthy_.set(healthyHosts().size());
-  info_->stats().membership_total_.set(hosts().size());
-  HostSetImpl::runUpdateCallbacks(hosts_added, hosts_removed);
+  if (snapped_callback != nullptr) {
+    snapped_callback();
+  }
 }
 
 void ClusterImplBase::setHealthChecker(const HealthCheckerSharedPtr& health_checker) {
@@ -289,7 +355,7 @@ void ClusterImplBase::setHealthChecker(const HealthCheckerSharedPtr& health_chec
   health_checker_->addHostCheckCompleteCb([this](HostSharedPtr, bool changed_state) -> void {
     // If we get a health check completion that resulted in a state change, signal to
     // update the host sets on all threads.
-    if (!block_hc_updates_ && changed_state) {
+    if (changed_state) {
       reloadHealthyHosts();
     }
   });
@@ -305,11 +371,23 @@ void ClusterImplBase::setOutlierDetector(const Outlier::DetectorSharedPtr& outli
 }
 
 void ClusterImplBase::reloadHealthyHosts() {
-  HostVectorConstSharedPtr hosts_copy(new std::vector<HostSharedPtr>(hosts()));
-  HostListsConstSharedPtr hosts_per_locality_copy(
-      new std::vector<std::vector<HostSharedPtr>>(hostsPerLocality()));
-  updateHosts(hosts_copy, createHealthyHostList(hosts()), hosts_per_locality_copy,
-              createHealthyHostLists(hostsPerLocality()), {}, {});
+  // Every time a host changes HC state we cause a full healthy host recalculation which
+  // for expensive LBs (ring, subset, etc.) can be quite time consuming. During startup, this
+  // can also block worker threads by doing this repeatedly. There is no reason to do this
+  // as we will not start taking traffic until we are initialized. By blocking HC updates
+  // while initializing we can avoid this.
+  if (initialization_complete_callback_ != nullptr) {
+    return;
+  }
+
+  for (auto& host_set : prioritySet().hostSetsPerPriority()) {
+    HostVectorConstSharedPtr hosts_copy(new std::vector<HostSharedPtr>(host_set->hosts()));
+    HostListsConstSharedPtr hosts_per_locality_copy(
+        new std::vector<std::vector<HostSharedPtr>>(host_set->hostsPerLocality()));
+    host_set->updateHosts(hosts_copy, createHealthyHostList(host_set->hosts()),
+                          hosts_per_locality_copy,
+                          createHealthyHostLists(host_set->hostsPerLocality()), {}, {});
+  }
 }
 
 ClusterInfoImpl::ResourceManagers::ResourceManagers(const envoy::api::v2::Cluster& config,
@@ -329,7 +407,21 @@ ClusterInfoImpl::ResourceManagers::load(const envoy::api::v2::Cluster& config,
   uint64_t max_pending_requests = 1024;
   uint64_t max_requests = 1024;
   uint64_t max_retries = 3;
-  const std::string runtime_prefix = fmt::format("circuit_breakers.{}.{}.", cluster_name, priority);
+
+  std::string priority_name;
+  switch (priority) {
+  case envoy::api::v2::RoutingPriority::DEFAULT:
+    priority_name = "default";
+    break;
+  case envoy::api::v2::RoutingPriority::HIGH:
+    priority_name = "high";
+    break;
+  default:
+    NOT_REACHED;
+  }
+
+  const std::string runtime_prefix =
+      fmt::format("circuit_breakers.{}.{}.", cluster_name, priority_name);
 
   const auto& thresholds = config.circuit_breakers().thresholds();
   const auto it =
@@ -353,17 +445,34 @@ StaticClusterImpl::StaticClusterImpl(const envoy::api::v2::Cluster& cluster,
                                      Ssl::ContextManager& ssl_context_manager, ClusterManager& cm,
                                      bool added_via_api)
     : ClusterImplBase(cluster, cm.sourceAddress(), runtime, stats, ssl_context_manager,
-                      added_via_api) {
-  HostVectorSharedPtr new_hosts(new std::vector<HostSharedPtr>());
+                      added_via_api),
+      initial_hosts_(new std::vector<HostSharedPtr>()) {
+
   for (const auto& host : cluster.hosts()) {
-    new_hosts->emplace_back(
+    initial_hosts_->emplace_back(
         HostSharedPtr{new HostImpl(info_, "", Network::Address::resolveProtoAddress(host),
                                    envoy::api::v2::Metadata::default_instance(), 1,
                                    envoy::api::v2::Locality().default_instance())});
   }
+}
 
-  updateHosts(new_hosts, createHealthyHostList(*new_hosts), empty_host_lists_, empty_host_lists_,
-              {}, {});
+void StaticClusterImpl::startPreInit() {
+  // At this point see if we have a health checker. If so, mark all the hosts unhealthy and then
+  // fire update callbacks to start the health checking process.
+  if (health_checker_) {
+    for (const auto& host : *initial_hosts_) {
+      host->healthFlagSet(Host::HealthFlag::FAILED_ACTIVE_HC);
+    }
+  }
+
+  // Given the current config, only EDS clusters support multiple priorities.
+  ASSERT(priority_set_.hostSetsPerPriority().size() == 1);
+  auto& first_host_set = priority_set_.getOrCreateHostSet(0);
+  first_host_set.updateHosts(initial_hosts_, createHealthyHostList(*initial_hosts_),
+                             empty_host_lists_, empty_host_lists_, *initial_hosts_, {});
+  initial_hosts_ = nullptr;
+
+  onPreInitComplete();
 }
 
 bool BaseDynamicClusterImpl::updateDynamicHostList(const std::vector<HostSharedPtr>& new_hosts,
@@ -480,10 +589,9 @@ StrictDnsClusterImpl::StrictDnsClusterImpl(const envoy::api::v2::Cluster& cluste
                           fmt::format("tcp://{}:{}", host.socket_address().address(),
                                       host.socket_address().port_value())));
   }
+}
 
-  // We have to first construct resolve_targets_ before invoking startResolve(),
-  // since startResolve() might resolve immediately and relies on
-  // resolve_targets_ indirectly for performing host updates on resolution.
+void StrictDnsClusterImpl::startPreInit() {
   for (const ResolveTargetPtr& target : resolve_targets_) {
     target->startResolve();
   }
@@ -499,8 +607,11 @@ void StrictDnsClusterImpl::updateAllHosts(const std::vector<HostSharedPtr>& host
     }
   }
 
-  updateHosts(new_hosts, createHealthyHostList(*new_hosts), empty_host_lists_, empty_host_lists_,
-              hosts_added, hosts_removed);
+  // Given the current config, only EDS clusters support multiple priorities.
+  ASSERT(priority_set_.hostSetsPerPriority().size() == 1);
+  auto& first_host_set = priority_set_.getOrCreateHostSet(0);
+  first_host_set.updateHosts(new_hosts, createHealthyHostList(*new_hosts), empty_host_lists_,
+                             empty_host_lists_, hosts_added, hosts_removed);
 }
 
 StrictDnsClusterImpl::ResolveTarget::ResolveTarget(StrictDnsClusterImpl& parent,
@@ -550,12 +661,7 @@ void StrictDnsClusterImpl::ResolveTarget::startResolve() {
         // multiple DNS names, this will return initialized after a single DNS resolution completes.
         // This is not perfect but is easier to code and unclear if the extra complexity is needed
         // so will start with this.
-        if (parent_.initialize_callback_) {
-          parent_.initialize_callback_();
-          parent_.initialize_callback_ = nullptr;
-        }
-        parent_.initialized_ = true;
-
+        parent_.onPreInitComplete();
         resolve_timer_->enableTimer(parent_.dns_refresh_rate_ms_);
       });
 }

@@ -19,7 +19,6 @@
 #include "common/upstream/upstream_impl.h"
 
 #include "test/common/upstream/utility.h"
-#include "test/integration/autonomous_upstream.h"
 #include "test/integration/utility.h"
 #include "test/mocks/upstream/mocks.h"
 #include "test/test_common/environment.h"
@@ -40,19 +39,19 @@ std::string normalizeDate(const std::string& s) {
   return std::regex_replace(s, date_regex, "date: Mon, 01 Jan 2017 00:00:00 GMT");
 }
 
-void setAllowAbsoluteUrl(envoy::api::v2::filter::http::HttpConnectionManager& hcm) {
+void setAllowAbsoluteUrl(envoy::api::v2::filter::network::HttpConnectionManager& hcm) {
   envoy::api::v2::Http1ProtocolOptions options;
   options.mutable_allow_absolute_url()->set_value(true);
   hcm.mutable_http_protocol_options()->CopyFrom(options);
 };
 
-envoy::api::v2::filter::http::HttpConnectionManager::CodecType
+envoy::api::v2::filter::network::HttpConnectionManager::CodecType
 typeToCodecType(Http::CodecClient::Type type) {
   switch (type) {
   case Http::CodecClient::Type::HTTP1:
-    return envoy::api::v2::filter::http::HttpConnectionManager::HTTP1;
+    return envoy::api::v2::filter::network::HttpConnectionManager::HTTP1;
   case Http::CodecClient::Type::HTTP2:
-    return envoy::api::v2::filter::http::HttpConnectionManager::HTTP2;
+    return envoy::api::v2::filter::network::HttpConnectionManager::HTTP2;
   default:
     RELEASE_ASSERT(0);
   }
@@ -141,33 +140,6 @@ void IntegrationCodecClient::ConnectionCallbacks::onEvent(Network::ConnectionEve
   }
 }
 
-void HttpIntegrationTest::SetUp() {
-  config_helper_.setClientCodec(typeToCodecType(downstream_protocol_));
-}
-
-void HttpIntegrationTest::initialize() {
-  BaseIntegrationTest::initialize();
-  createUpstreams();
-
-  config_helper_.finalize(ports_);
-
-  ENVOY_LOG_MISC(debug, "Running Envoy with configuration {}",
-                 config_helper_.bootstrap().DebugString());
-
-  const std::string bootstrap_path = TestEnvironment::writeStringToFileForTest(
-      "bootstrap.json", MessageUtil::getJsonStringFromMessage(config_helper_.bootstrap()));
-  createGeneratedApiTestServer(bootstrap_path, named_ports_);
-}
-
-void HttpIntegrationTest::createUpstreams() {
-  if (autonomous_upstream_) {
-    fake_upstreams_.emplace_back(new AutonomousUpstream(0, upstream_protocol_, version_));
-  } else {
-    fake_upstreams_.emplace_back(new FakeUpstream(0, upstream_protocol_, version_));
-  }
-  ports_.push_back(fake_upstreams_.back()->localAddress()->ip()->port());
-}
-
 IntegrationCodecClientPtr HttpIntegrationTest::makeHttpConnection(uint32_t port) {
   return makeHttpConnection(makeClientConnection(port));
 }
@@ -182,8 +154,12 @@ HttpIntegrationTest::makeHttpConnection(Network::ClientConnectionPtr&& conn) {
 }
 
 HttpIntegrationTest::HttpIntegrationTest(Http::CodecClient::Type downstream_protocol,
-                                         Network::Address::IpVersion version)
-    : BaseIntegrationTest(version), downstream_protocol_(downstream_protocol) {}
+                                         Network::Address::IpVersion version,
+                                         const std::string& config)
+    : BaseIntegrationTest(version, config), downstream_protocol_(downstream_protocol) {
+  named_ports_ = {{"http"}};
+  config_helper_.setClientCodec(typeToCodecType(downstream_protocol_));
+}
 
 HttpIntegrationTest::~HttpIntegrationTest() {
   cleanupUpstreamAndDownstream();
@@ -194,19 +170,6 @@ HttpIntegrationTest::~HttpIntegrationTest() {
 void HttpIntegrationTest::setDownstreamProtocol(Http::CodecClient::Type downstream_protocol) {
   downstream_protocol_ = downstream_protocol;
   config_helper_.setClientCodec(typeToCodecType(downstream_protocol_));
-}
-
-void HttpIntegrationTest::setUpstreamProtocol(FakeHttpConnection::Type protocol) {
-  upstream_protocol_ = protocol;
-  if (upstream_protocol_ == FakeHttpConnection::Type::HTTP2) {
-    config_helper_.addConfigModifier([&](envoy::api::v2::Bootstrap& bootstrap) -> void {
-      RELEASE_ASSERT(bootstrap.mutable_static_resources()->clusters_size() == 1);
-      auto* cluster = bootstrap.mutable_static_resources()->mutable_clusters(0);
-      cluster->mutable_http2_protocol_options();
-    });
-  } else {
-    RELEASE_ASSERT(protocol == FakeHttpConnection::Type::HTTP1);
-  }
 }
 
 void HttpIntegrationTest::sendRequestAndWaitForResponse(Http::TestHeaderMapImpl& request_headers,
@@ -240,10 +203,11 @@ void HttpIntegrationTest::cleanupUpstreamAndDownstream() {
   }
 }
 
-void HttpIntegrationTest::waitForNextUpstreamRequest() {
+void HttpIntegrationTest::waitForNextUpstreamRequest(uint64_t upstream_index) {
   // If there is no upstream connection, wait for it to be established.
   if (!fake_upstream_connection_) {
-    fake_upstream_connection_ = fake_upstreams_[0]->waitForHttpConnection(*dispatcher_);
+    fake_upstream_connection_ =
+        fake_upstreams_[upstream_index]->waitForHttpConnection(*dispatcher_);
   }
   // Wait for the next stream on the upstream connection.
   upstream_request_ = fake_upstream_connection_->waitForNewStream(*dispatcher_);
@@ -276,9 +240,9 @@ void HttpIntegrationTest::testRouterRequestAndResponseWithBody(
 
 void HttpIntegrationTest::testRouterHeaderOnlyRequestAndResponse(
     bool close_upstream, ConnectionCreationFunction* create_connection) {
-  // This is called multiple times per test in ads_integration_test.  Only call
+  // This is called multiple times per test in ads_integration_test. Only call
   // initialize() the first time.
-  if (!initialized_) {
+  if (!initialized()) {
     initialize();
   }
   codec_client_ = makeHttpConnection(
@@ -326,9 +290,37 @@ void HttpIntegrationTest::testRouterNotFoundWithBody() {
   EXPECT_STREQ("404", response->headers().Status()->value().c_str());
 }
 
+// Add a route that uses unknown cluster (expect 404 Not Found).
+void HttpIntegrationTest::testRouterClusterNotFound404() {
+  config_helper_.addRoute("foo.com", "/unknown", "unknown_cluster", false,
+                          envoy::api::v2::RouteAction::NOT_FOUND,
+                          envoy::api::v2::VirtualHost::NONE);
+  initialize();
+
+  BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
+      lookupPort("http"), "GET", "/unknown", "", downstream_protocol_, version_, "foo.com");
+  EXPECT_TRUE(response->complete());
+  EXPECT_STREQ("404", response->headers().Status()->value().c_str());
+}
+
+// Add a route that uses unknown cluster (expect 503 Service Unavailable).
+void HttpIntegrationTest::testRouterClusterNotFound503() {
+  config_helper_.addRoute("foo.com", "/unknown", "unknown_cluster", false,
+                          envoy::api::v2::RouteAction::SERVICE_UNAVAILABLE,
+                          envoy::api::v2::VirtualHost::NONE);
+  initialize();
+
+  BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
+      lookupPort("http"), "GET", "/unknown", "", downstream_protocol_, version_, "foo.com");
+  EXPECT_TRUE(response->complete());
+  EXPECT_STREQ("503", response->headers().Status()->value().c_str());
+}
+
 // Add a route which redirects HTTP to HTTPS, and verify Envoy sends a 301
 void HttpIntegrationTest::testRouterRedirect() {
-  config_helper_.addRoute("www.redirect.com", "/", "cluster_0", envoy::api::v2::VirtualHost::ALL);
+  config_helper_.addRoute("www.redirect.com", "/", "cluster_0", true,
+                          envoy::api::v2::RouteAction::SERVICE_UNAVAILABLE,
+                          envoy::api::v2::VirtualHost::ALL);
   initialize();
 
   BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
@@ -441,7 +433,7 @@ void HttpIntegrationTest::testRouterDownstreamDisconnectBeforeRequestComplete(
   upstream_request_->waitForHeadersComplete();
   codec_client_->close();
 
-  if (upstream_protocol_ == FakeHttpConnection::Type::HTTP1) {
+  if (upstreamProtocol() == FakeHttpConnection::Type::HTTP1) {
     fake_upstream_connection_->waitForDisconnect();
   } else {
     upstream_request_->waitForReset();
@@ -471,7 +463,7 @@ void HttpIntegrationTest::testRouterDownstreamDisconnectBeforeResponseComplete(
   response_->waitForBodyData(512);
   codec_client_->close();
 
-  if (upstream_protocol_ == FakeHttpConnection::Type::HTTP1) {
+  if (upstreamProtocol() == FakeHttpConnection::Type::HTTP1) {
     fake_upstream_connection_->waitForDisconnect();
   } else {
     upstream_request_->waitForReset();
@@ -502,7 +494,7 @@ void HttpIntegrationTest::testRouterUpstreamResponseBeforeRequestComplete() {
   upstream_request_->encodeData(512, true);
   response_->waitForEndStream();
 
-  if (upstream_protocol_ == FakeHttpConnection::Type::HTTP1) {
+  if (upstreamProtocol() == FakeHttpConnection::Type::HTTP1) {
     fake_upstream_connection_->waitForDisconnect();
   } else {
     upstream_request_->waitForReset();
@@ -625,17 +617,17 @@ void HttpIntegrationTest::testRetryHittingBufferLimit() {
   EXPECT_STREQ("503", response_->headers().Status()->value().c_str());
 }
 
-// Test hitting the dynamo filter with too many request bytes to buffer.  Ensure the connection
+// Test hitting the dynamo filter with too many request bytes to buffer. Ensure the connection
 // manager sends a 413.
 void HttpIntegrationTest::testHittingDecoderFilterLimit() {
-  config_helper_.addFilter("{ name: envoy.http_dynamo_filter, config: { deprecated_v1: true } }");
+  config_helper_.addFilter("{ name: envoy.http_dynamo_filter, config: {} }");
   config_helper_.setBufferLimits(1024, 1024);
   initialize();
 
   codec_client_ = makeHttpConnection(lookupPort("http"));
 
   // Envoy will likely connect and proxy some unspecified amount of data before
-  // hitting the buffer limit and disconnecting.  Ignore this if it happens.
+  // hitting the buffer limit and disconnecting. Ignore this if it happens.
   fake_upstreams_[0]->set_allow_unexpected_disconnects(true);
   codec_client_->makeRequestWithBody(Http::TestHeaderMapImpl{{":method", "POST"},
                                                              {":path", "/dynamo/url"},
@@ -650,10 +642,10 @@ void HttpIntegrationTest::testHittingDecoderFilterLimit() {
   EXPECT_STREQ("413", response_->headers().Status()->value().c_str());
 }
 
-// Test hitting the dynamo filter with too many response bytes to buffer.  Given the request headers
+// Test hitting the dynamo filter with too many response bytes to buffer. Given the request headers
 // are sent on early, the stream/connection will be reset.
 void HttpIntegrationTest::testHittingEncoderFilterLimit() {
-  config_helper_.addFilter("{ name: envoy.http_dynamo_filter, config: { deprecated_v1: true } }");
+  config_helper_.addFilter("{ name: envoy.http_dynamo_filter, config: {} }");
   config_helper_.setBufferLimits(1024, 1024);
   initialize();
 
@@ -671,18 +663,13 @@ void HttpIntegrationTest::testHittingEncoderFilterLimit() {
 
   // Send the respone headers.
   upstream_request_->encodeHeaders(Http::TestHeaderMapImpl{{":status", "200"}}, false);
-  // Make sure the headers are received before the body is sent.
-  response_->waitForHeaders();
+
   // Now send an overly large response body.
   upstream_request_->encodeData(1024 * 65, false);
 
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP2) {
-    response_->waitForReset();
-  } else {
-    response_->waitForEndStream();
-  }
-  EXPECT_FALSE(response_->complete());
-  EXPECT_STREQ("200", response_->headers().Status()->value().c_str());
+  response_->waitForEndStream();
+  EXPECT_TRUE(response_->complete());
+  EXPECT_STREQ("500", response_->headers().Status()->value().c_str());
 }
 
 void HttpIntegrationTest::testTwoRequests() {
@@ -790,7 +777,9 @@ void HttpIntegrationTest::testNoHost() {
 void HttpIntegrationTest::testAbsolutePath() {
   // Configure www.redirect.com to send a redirect, and ensure the redirect is
   // encountered via absolute URL.
-  config_helper_.addRoute("www.redirect.com", "/", "cluster_0", envoy::api::v2::VirtualHost::ALL);
+  config_helper_.addRoute("www.redirect.com", "/", "cluster_0", true,
+                          envoy::api::v2::RouteAction::SERVICE_UNAVAILABLE,
+                          envoy::api::v2::VirtualHost::ALL);
   config_helper_.addConfigModifier(&setAllowAbsoluteUrl);
 
   initialize();
@@ -811,7 +800,8 @@ void HttpIntegrationTest::testAbsolutePath() {
 void HttpIntegrationTest::testAbsolutePathWithPort() {
   // Configure www.namewithport.com:1234 to send a redirect, and ensure the redirect is
   // encountered via absolute URL with a port.
-  config_helper_.addRoute("www.namewithport.com:1234", "/", "cluster_0",
+  config_helper_.addRoute("www.namewithport.com:1234", "/", "cluster_0", true,
+                          envoy::api::v2::RouteAction::SERVICE_UNAVAILABLE,
                           envoy::api::v2::VirtualHost::ALL);
   config_helper_.addConfigModifier(&setAllowAbsoluteUrl);
   initialize();
@@ -833,7 +823,8 @@ void HttpIntegrationTest::testAbsolutePathWithoutPort() {
   // Add a restrictive default match, to avoid the request hitting the * / catchall.
   config_helper_.setDefaultHostAndRoute("foo.com", "/found");
   // Set a matcher for namewithport:1234 and verify http://namewithport does not match
-  config_helper_.addRoute("www.namewithport.com:1234", "/", "cluster_0",
+  config_helper_.addRoute("www.namewithport.com:1234", "/", "cluster_0", true,
+                          envoy::api::v2::RouteAction::SERVICE_UNAVAILABLE,
                           envoy::api::v2::VirtualHost::ALL);
   config_helper_.addConfigModifier(&setAllowAbsoluteUrl);
   initialize();
@@ -1052,7 +1043,7 @@ void HttpIntegrationTest::testDownstreamResetBeforeResponseComplete() {
   response_->waitForBodyData(512);
   codec_client_->sendReset(*request_encoder_);
 
-  if (upstream_protocol_ == FakeHttpConnection::Type::HTTP1) {
+  if (upstreamProtocol() == FakeHttpConnection::Type::HTTP1) {
     fake_upstream_connection_->waitForDisconnect();
   } else {
     upstream_request_->waitForReset();

@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "envoy/access_log/access_log.h"
 #include "envoy/event/deferred_deletable.h"
-#include "envoy/http/access_log.h"
 #include "envoy/http/codec.h"
 #include "envoy/http/filter.h"
 #include "envoy/http/websocket.h"
@@ -25,10 +25,10 @@
 
 #include "common/buffer/watermark_buffer.h"
 #include "common/common/linked_object.h"
-#include "common/http/access_log/request_info_impl.h"
 #include "common/http/date_provider.h"
 #include "common/http/user_agent.h"
 #include "common/http/websocket/ws_handler_impl.h"
+#include "common/request_info/request_info_impl.h"
 #include "common/tracing/http_tracer_impl.h"
 
 namespace Envoy {
@@ -339,6 +339,7 @@ private:
     bool commonHandleAfterTrailersCallback(FilterTrailersStatus status);
 
     void commonContinue();
+    virtual bool canContinue() PURE;
     virtual Buffer::WatermarkBufferPtr createBuffer() PURE;
     virtual Buffer::WatermarkBufferPtr& bufferedData() PURE;
     virtual bool complete() PURE;
@@ -354,9 +355,9 @@ private:
     Router::RouteConstSharedPtr route() override;
     void clearRouteCache() override;
     uint64_t streamId() override;
-    AccessLog::RequestInfo& requestInfo() override;
+    RequestInfo::RequestInfo& requestInfo() override;
     Tracing::Span& activeSpan() override;
-    const std::string& downstreamAddress() override;
+    Tracing::Config& tracingConfig() override;
 
     ActiveStream& parent_;
     bool headers_continued_ : 1;
@@ -375,6 +376,14 @@ private:
         : ActiveStreamFilterBase(parent, dual_filter), handle_(filter) {}
 
     // ActiveStreamFilterBase
+    bool canContinue() override {
+      // It is possible for the connection manager to respond directly to a request even while
+      // a filter is trying to continue. If a response has already happened, we should not
+      // continue to further filters. A concrete example of this is a filter buffering data, the
+      // last data frame comes in and the filter continues, but the final buffering takes the stream
+      // over the high watermark such that a 413 is returned.
+      return !parent_.state_.local_complete_;
+    }
     Buffer::WatermarkBufferPtr createBuffer() override;
     Buffer::WatermarkBufferPtr& bufferedData() override { return parent_.buffered_request_data_; }
     bool complete() override { return parent_.state_.remote_complete_; }
@@ -424,6 +433,7 @@ private:
         : ActiveStreamFilterBase(parent, dual_filter), handle_(filter) {}
 
     // ActiveStreamFilterBase
+    bool canContinue() override { return true; }
     Buffer::WatermarkBufferPtr createBuffer() override;
     Buffer::WatermarkBufferPtr& bufferedData() override { return parent_.buffered_response_data_; }
     bool complete() override { return parent_.state_.local_complete_; }
@@ -509,7 +519,7 @@ private:
       addStreamDecoderFilterWorker(filter, true);
       addStreamEncoderFilterWorker(filter, true);
     }
-    void addAccessLogHandler(Http::AccessLog::InstanceSharedPtr handler) override;
+    void addAccessLogHandler(AccessLog::InstanceSharedPtr handler) override;
 
     // Http::WsHandlerCallbacks
     void sendHeadersOnlyResponse(HeaderMap& headers) override {
@@ -522,7 +532,7 @@ private:
 
     void traceRequest();
 
-    // Pass on watermark callbacks to watermark subscribers.  This boils down to passing watermark
+    // Pass on watermark callbacks to watermark subscribers. This boils down to passing watermark
     // events for this stream and the downstream connection to the router filter.
     void callHighWatermarkCallbacks();
     void callLowWatermarkCallbacks();
@@ -547,7 +557,7 @@ private:
 
       uint32_t filter_call_state_{0};
       // The following 3 members are booleans rather than part of the space-saving bitfield as they
-      // are passed as arguments to functions expecting bools.  Extend State using the bitfield
+      // are passed as arguments to functions expecting bools. Extend State using the bitfield
       // where possible.
       bool encoder_filters_streaming_{true};
       bool decoder_filters_streaming_{true};
@@ -573,14 +583,15 @@ private:
     HeaderMapPtr request_trailers_;
     std::list<ActiveStreamDecoderFilterPtr> decoder_filters_;
     std::list<ActiveStreamEncoderFilterPtr> encoder_filters_;
-    std::list<Http::AccessLog::InstanceSharedPtr> access_log_handlers_;
+    std::list<AccessLog::InstanceSharedPtr> access_log_handlers_;
     Stats::TimespanPtr request_timer_;
     State state_;
-    AccessLog::RequestInfoImpl request_info_;
+    RequestInfo::RequestInfoImpl request_info_;
     Optional<Router::RouteConstSharedPtr> cached_route_;
     DownstreamWatermarkCallbacks* watermark_callbacks_{nullptr};
     uint32_t buffer_limit_{0};
     uint32_t high_watermark_count_{0};
+    const std::string* decorated_operation_{nullptr};
   };
 
   typedef std::unique_ptr<ActiveStream> ActiveStreamPtr;

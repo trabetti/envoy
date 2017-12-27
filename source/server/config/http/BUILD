@@ -15,9 +15,34 @@ envoy_cc_library(
     deps = [
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
+        "//source/common/config:filter_json_lib",
         "//source/common/config:well_known_names",
         "//source/common/http/filter:buffer_filter_lib",
-        "//source/common/json:config_schemas_lib",
+        "//source/common/protobuf:utility_lib",
+    ],
+)
+
+envoy_cc_library(
+    name = "lua_lib",
+    srcs = ["lua.cc"],
+    hdrs = ["lua.h"],
+    deps = [
+        "//include/envoy/registry",
+        "//include/envoy/server:filter_config_interface",
+        "//source/common/config:filter_json_lib",
+        "//source/common/config:well_known_names",
+        "//source/common/http/filter/lua:lua_filter_lib",
+    ],
+)
+
+envoy_cc_library(
+    name = "empty_http_filter_config_lib",
+    hdrs = ["empty_http_filter_config.h"],
+    deps = [
+        "//include/envoy/registry",
+        "//include/envoy/server:filter_config_interface",
+        "//source/common/config:well_known_names",
+        "//source/common/protobuf",
     ],
 )
 
@@ -26,6 +51,7 @@ envoy_cc_library(
     srcs = ["cors.cc"],
     hdrs = ["cors.h"],
     deps = [
+        ":empty_http_filter_config_lib",
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
         "//source/common/config:well_known_names",
@@ -38,6 +64,7 @@ envoy_cc_library(
     srcs = ["dynamo.cc"],
     hdrs = ["dynamo.h"],
     deps = [
+        ":empty_http_filter_config_lib",
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
         "//source/common/config:well_known_names",
@@ -52,24 +79,9 @@ envoy_cc_library(
     deps = [
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
+        "//source/common/config:filter_json_lib",
         "//source/common/config:well_known_names",
         "//source/common/http/filter:fault_filter_lib",
-        "//source/common/json:config_schemas_lib",
-    ],
-)
-
-envoy_cc_library(
-    name = "file_access_log_lib",
-    srcs = ["file_access_log.cc"],
-    hdrs = ["file_access_log.h"],
-    external_deps = ["envoy_filter_http_connection_manager"],
-    deps = [
-        "//include/envoy/registry",
-        "//include/envoy/server:access_log_config_interface",
-        "//source/common/config:well_known_names",
-        "//source/common/http/access_log:access_log_formatter_lib",
-        "//source/common/http/access_log:access_log_lib",
-        "//source/common/protobuf",
     ],
 )
 
@@ -78,6 +90,7 @@ envoy_cc_library(
     srcs = ["grpc_http1_bridge.cc"],
     hdrs = ["grpc_http1_bridge.h"],
     deps = [
+        ":empty_http_filter_config_lib",
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
         "//source/common/config:well_known_names",
@@ -102,6 +115,7 @@ envoy_cc_library(
     srcs = ["grpc_web.cc"],
     hdrs = ["grpc_web.h"],
     deps = [
+        ":empty_http_filter_config_lib",
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
         "//source/common/config:well_known_names",
@@ -141,9 +155,11 @@ envoy_cc_library(
     deps = [
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
+        "//source/common/config:filter_json_lib",
         "//source/common/config:well_known_names",
         "//source/common/http/filter:ratelimit_includes",
         "//source/common/http/filter:ratelimit_lib",
+        "//source/common/protobuf:utility_lib",
     ],
 )
 
@@ -151,9 +167,11 @@ envoy_cc_library(
     name = "router_lib",
     srcs = ["router.cc"],
     hdrs = ["router.h"],
+    external_deps = ["envoy_filter_http_router"],
     deps = [
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
+        "//source/common/config:filter_json_lib",
         "//source/common/config:well_known_names",
         "//source/common/json:config_schemas_lib",
         "//source/common/router:router_lib",

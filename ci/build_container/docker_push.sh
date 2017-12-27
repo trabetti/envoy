@@ -27,21 +27,23 @@ then
         cd ci/build_container
         docker login -u "$DOCKERHUB_USERNAME" -p "$DOCKERHUB_PASSWORD"
 
-        for distro in ubuntu centos
+        # centos has been removed because the version of cmake is too old to build now. Someone who
+        # cares about centos needs to come back and fix this.
+        for distro in ubuntu
         do
-            echo "Updating lyft/envoy-build-${distro} image"
+            echo "Updating envoyproxy/envoy-build-${distro} image"
             LINUX_DISTRO=$distro ./docker_build.sh
-            docker push lyft/envoy-build-${distro}:$CIRCLE_SHA1
-            docker tag lyft/envoy-build-${distro}:$CIRCLE_SHA1 lyft/envoy-build-${distro}:latest
-            docker push lyft/envoy-build-${distro}:latest
+            docker push envoyproxy/envoy-build-"${distro}":"$CIRCLE_SHA1"
+            docker tag envoyproxy/envoy-build-"${distro}":"$CIRCLE_SHA1" envoyproxy/envoy-build-"${distro}":latest
+            docker push envoyproxy/envoy-build-"${distro}":latest
 
             if [ "$distro" == "ubuntu" ]
             then
-                echo "Updating lyft/envoy-build image"
-                docker tag lyft/envoy-build-${distro}:$CIRCLE_SHA1 lyft/envoy-build:$CIRCLE_SHA1
-                docker push lyft/envoy-build:$CIRCLE_SHA1
-                docker tag lyft/envoy-build:$CIRCLE_SHA1 lyft/envoy-build:latest
-                docker push lyft/envoy-build:latest
+                echo "Updating envoyproxy/envoy-build image"
+                docker tag envoyproxy/envoy-build-"${distro}":"$CIRCLE_SHA1" envoyproxy/envoy-build:"$CIRCLE_SHA1"
+                docker push envoyproxy/envoy-build:"$CIRCLE_SHA1"
+                docker tag envoyproxy/envoy-build:"$CIRCLE_SHA1" envoyproxy/envoy-build:latest
+                docker push envoyproxy/envoy-build:latest
             fi
         done
     else

@@ -19,9 +19,11 @@ namespace Upstream {
 
 class SubsetLoadBalancer : public LoadBalancer, Logger::Loggable<Logger::Id::upstream> {
 public:
-  SubsetLoadBalancer(LoadBalancerType lb_type, HostSet& host_set, const HostSet* local_host_set,
-                     ClusterStats& stats, Runtime::Loader& runtime,
-                     Runtime::RandomGenerator& random, const LoadBalancerSubsetInfo& subsets);
+  SubsetLoadBalancer(
+      LoadBalancerType lb_type, PrioritySet& priority_set, const PrioritySet* local_priority_set,
+      ClusterStats& stats, Runtime::Loader& runtime, Runtime::RandomGenerator& random,
+      const LoadBalancerSubsetInfo& subsets,
+      const Optional<envoy::api::v2::Cluster::RingHashLbConfig>& lb_ring_hash_config);
 
   // Upstream::LoadBalancer
   HostConstSharedPtr chooseHost(LoadBalancerContext* context) override;
@@ -33,7 +35,7 @@ private:
   class HostSubsetImpl : public HostSetImpl {
   public:
     HostSubsetImpl(const HostSet& original_host_set)
-        : HostSetImpl(), original_host_set_(original_host_set) {}
+        : HostSetImpl(original_host_set.priority()), original_host_set_(original_host_set) {}
 
     void update(const std::vector<HostSharedPtr>& hosts_added,
                 const std::vector<HostSharedPtr>& hosts_removed, HostPredicate predicate);
@@ -45,7 +47,41 @@ private:
     const HostSet& original_host_set_;
   };
 
+  // Represents a subset of an original PrioritySet.
+  class PrioritySubsetImpl : public PrioritySetImpl {
+  public:
+    PrioritySubsetImpl(const SubsetLoadBalancer& subset_lb, HostPredicate predicate);
+
+    void update(uint32_t priority, const std::vector<HostSharedPtr>& hosts_added,
+                const std::vector<HostSharedPtr>& hosts_removed, HostPredicate predicate);
+
+    bool empty() { return empty_; }
+
+    HostSubsetImpl* getOrCreateHostSubset(uint32_t priority) {
+      return reinterpret_cast<HostSubsetImpl*>(&getOrCreateHostSet(priority));
+    }
+
+    void triggerCallbacks() {
+      for (size_t i = 0; i < hostSetsPerPriority().size(); ++i) {
+        getOrCreateHostSubset(i)->triggerCallbacks();
+      }
+    }
+
+    // Thread aware LB if applicable.
+    ThreadAwareLoadBalancerPtr thread_aware_lb_;
+    // Current active LB.
+    LoadBalancerPtr lb_;
+
+  protected:
+    HostSetImplPtr createHostSet(uint32_t priority) override;
+
+  private:
+    const PrioritySet& original_priority_set_;
+    bool empty_ = true;
+  };
+
   typedef std::shared_ptr<HostSubsetImpl> HostSubsetImplPtr;
+  typedef std::shared_ptr<PrioritySubsetImpl> PrioritySubsetImplPtr;
 
   typedef std::vector<std::pair<std::string, ProtobufWkt::Value>> SubsetMetadata;
 
@@ -59,23 +95,20 @@ private:
   public:
     LbSubsetEntry() {}
 
-    bool initialized() const { return lb_ != nullptr && host_subset_ != nullptr; }
-    bool active() const { return initialized() && !host_subset_->empty(); }
-
-    void initLoadBalancer(const SubsetLoadBalancer& subset_lb, HostPredicate predicate);
+    bool initialized() const { return priority_subset_ != nullptr; }
+    bool active() const { return initialized() && !priority_subset_->empty(); }
 
     LbSubsetMap children_;
 
     // Only initialized if a match exists at this level.
-    HostSubsetImplPtr host_subset_;
-    LoadBalancerPtr lb_;
+    PrioritySubsetImplPtr priority_subset_;
   };
 
-  // Implements HostSet::MemberUpdateCb
-  void update(const std::vector<HostSharedPtr>& hosts_added,
+  // Called by HostSet::MemberUpdateCb
+  void update(uint32_t priority, const std::vector<HostSharedPtr>& hosts_added,
               const std::vector<HostSharedPtr>& hosts_removed);
 
-  void updateFallbackSubset(const std::vector<HostSharedPtr>& hosts_added,
+  void updateFallbackSubset(uint32_t priority, const std::vector<HostSharedPtr>& hosts_added,
                             const std::vector<HostSharedPtr>& hosts_removed);
   void processSubsets(const std::vector<HostSharedPtr>& hosts_added,
                       const std::vector<HostSharedPtr>& hosts_removed,
@@ -94,9 +127,8 @@ private:
 
   SubsetMetadata extractSubsetMetadata(const std::set<std::string>& subset_keys, const Host& host);
 
-  const HostSetImpl& emptyHostSet() { CONSTRUCT_ON_FIRST_USE(HostSetImpl); };
-
   const LoadBalancerType lb_type_;
+  const Optional<envoy::api::v2::Cluster::RingHashLbConfig> lb_ring_hash_config_;
   ClusterStats& stats_;
   Runtime::Loader& runtime_;
   Runtime::RandomGenerator& random_;
@@ -105,8 +137,8 @@ private:
   const ProtobufWkt::Struct default_subset_;
   const std::vector<std::set<std::string>> subset_keys_;
 
-  const HostSet& original_host_set_;
-  const HostSet* original_local_host_set_;
+  const PrioritySet& original_priority_set_;
+  const PrioritySet* original_local_priority_set_;
 
   LbSubsetEntryPtr fallback_subset_;
 

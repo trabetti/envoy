@@ -5,8 +5,8 @@
 #include <memory>
 #include <string>
 
+#include "envoy/access_log/access_log.h"
 #include "envoy/event/dispatcher.h"
-#include "envoy/http/access_log.h"
 #include "envoy/http/codec.h"
 #include "envoy/http/header_map.h"
 #include "envoy/router/router.h"
@@ -47,7 +47,7 @@ enum class FilterDataStatus {
   // continuing processing and so can not push back on streaming data via watermarks.
   //
   // If buffering the request causes buffered data to exceed the configured buffer limit, a 413 will
-  // be sent to the user.  On the response path exceeding buffer limits will result in a 500.
+  // be sent to the user. On the response path exceeding buffer limits will result in a 500.
   StopIterationAndBuffer,
   // Do not iterate to any of the remaining filters in the chain, and buffer body data for later
   // dispatching. Returning FilterDataStatus::Continue from decodeData()/encodeData() or calling
@@ -126,7 +126,7 @@ public:
    * @return requestInfo for logging purposes. Individual filter may add specific information to be
    * put into the access log.
    */
-  virtual AccessLog::RequestInfo& requestInfo() PURE;
+  virtual RequestInfo::RequestInfo& requestInfo() PURE;
 
   /**
    * @return span context used for tracing purposes. Individual filters may add or modify
@@ -135,9 +135,9 @@ public:
   virtual Tracing::Span& activeSpan() PURE;
 
   /**
-   * @return the trusted downstream address for the connection.
+   * @return tracing configuration.
    */
-  virtual const std::string& downstreamAddress() PURE;
+  virtual const Tracing::Config& tracingConfig() PURE;
 };
 
 /**
@@ -219,7 +219,7 @@ public:
    * their high watermark.
    *
    * In the case of a filter such as the router filter, which spills into multiple buffers (codec,
-   * connection etc.) this may be called multiple times.  Any such filter is responsible for calling
+   * connection etc.) this may be called multiple times. Any such filter is responsible for calling
    * the low watermark callbacks an equal number of times as the respective buffers are drained.
    */
   virtual void onDecoderFilterAboveWriteBufferHighWatermark() PURE;
@@ -469,7 +469,7 @@ public:
    * Add an access log handler that is called when the stream is destroyed.
    * @param handler supplies the handler to add.
    */
-  virtual void addAccessLogHandler(Http::AccessLog::InstanceSharedPtr handler) PURE;
+  virtual void addAccessLogHandler(AccessLog::InstanceSharedPtr handler) PURE;
 };
 
 /**

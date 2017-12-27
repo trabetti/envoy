@@ -5,19 +5,23 @@
 #include <string>
 #include <vector>
 
+#include "envoy/access_log/access_log.h"
 #include "envoy/event/timer.h"
 #include "envoy/network/connection.h"
 #include "envoy/network/filter.h"
+#include "envoy/server/filter_config.h"
 #include "envoy/stats/stats_macros.h"
 #include "envoy/stats/timespan.h"
 #include "envoy/upstream/cluster_manager.h"
 #include "envoy/upstream/upstream.h"
 
 #include "common/common/logger.h"
-#include "common/json/json_loader.h"
 #include "common/network/cidr_range.h"
 #include "common/network/filter_impl.h"
 #include "common/network/utility.h"
+#include "common/request_info/request_info_impl.h"
+
+#include "api/filter/network/tcp_proxy.pb.h"
 
 namespace Envoy {
 namespace Filter {
@@ -34,7 +38,8 @@ namespace Filter {
   COUNTER(downstream_cx_total)                                                                     \
   COUNTER(downstream_cx_no_route)                                                                  \
   COUNTER(downstream_flow_control_paused_reading_total)                                            \
-  COUNTER(downstream_flow_control_resumed_reading_total)
+  COUNTER(downstream_flow_control_resumed_reading_total)                                           \
+  COUNTER(idle_timeout)
 // clang-format on
 
 /**
@@ -49,8 +54,8 @@ struct TcpProxyStats {
  */
 class TcpProxyConfig {
 public:
-  TcpProxyConfig(const Json::Object& config, Upstream::ClusterManager& cluster_manager,
-                 Stats::Scope& scope);
+  TcpProxyConfig(const envoy::api::v2::filter::network::TcpProxy& config,
+                 Server::Configuration::FactoryContext& context);
 
   /**
    * Find out which cluster an upstream connection should be opened to based on the
@@ -63,10 +68,13 @@ public:
   const std::string& getRouteFromEntries(Network::Connection& connection);
 
   const TcpProxyStats& stats() { return stats_; }
+  const std::vector<AccessLog::InstanceSharedPtr>& accessLogs() { return access_logs_; }
+  uint32_t maxConnectAttempts() const { return max_connect_attempts_; }
+  const Optional<std::chrono::milliseconds>& idleTimeout() { return idle_timeout_; }
 
 private:
   struct Route {
-    Route(const Json::Object& config);
+    Route(const envoy::api::v2::filter::network::TcpProxy::DeprecatedV1::TCPRoute& config);
 
     Network::Address::IpList source_ips_;
     Network::PortRangeList source_port_ranges_;
@@ -79,6 +87,9 @@ private:
 
   std::vector<Route> routes_;
   const TcpProxyStats stats_;
+  std::vector<AccessLog::InstanceSharedPtr> access_logs_;
+  const uint32_t max_connect_attempts_;
+  Optional<std::chrono::milliseconds> idle_timeout_;
 };
 
 typedef std::shared_ptr<TcpProxyConfig> TcpProxyConfigSharedPtr;
@@ -144,31 +155,34 @@ protected:
     bool on_high_watermark_called_{false};
   };
 
+  enum class UpstreamFailureReason {
+    CONNECT_FAILED,
+    NO_HEALTHY_UPSTREAM,
+    RESOURCE_LIMIT_EXCEEDED,
+    NO_ROUTE,
+  };
+
   // Callbacks for different error and success states during connection establishment
   virtual const std::string& getUpstreamCluster() {
     return config_->getRouteFromEntries(read_callbacks_->connection());
   }
 
-  virtual void onInitFailure() {
+  virtual void onInitFailure(UpstreamFailureReason) {
     read_callbacks_->connection().close(Network::ConnectionCloseType::NoFlush);
-  }
-
-  virtual void onConnectTimeoutError() {
-    read_callbacks_->connection().close(Network::ConnectionCloseType::NoFlush);
-  }
-
-  virtual void onConnectionFailure() {
-    read_callbacks_->connection().close(Network::ConnectionCloseType::FlushWrite);
   }
 
   virtual void onConnectionSuccess() {}
-  virtual void onUpstreamHostReady() {}
 
   Network::FilterStatus initializeUpstreamConnection();
   void onConnectTimeout();
   void onDownstreamEvent(Network::ConnectionEvent event);
   void onUpstreamData(Buffer::Instance& data);
   void onUpstreamEvent(Network::ConnectionEvent event);
+  void finalizeUpstreamConnectionStats();
+  void closeUpstreamConnection();
+  void onIdleTimeout();
+  void resetIdleTimer();
+  void disableIdleTimer();
 
   TcpProxyConfigSharedPtr config_;
   Upstream::ClusterManager& cluster_manager_;
@@ -176,10 +190,13 @@ protected:
   Network::ClientConnectionPtr upstream_connection_;
   DownstreamCallbacks downstream_callbacks_;
   Event::TimerPtr connect_timeout_timer_;
+  Event::TimerPtr idle_timer_;
   Stats::TimespanPtr connect_timespan_;
   Stats::TimespanPtr connected_timespan_;
   std::shared_ptr<UpstreamCallbacks> upstream_callbacks_; // shared_ptr required for passing as a
                                                           // read filter.
+  RequestInfo::RequestInfoImpl request_info_;
+  uint32_t connect_attempts_{};
 };
 
 } // Filter

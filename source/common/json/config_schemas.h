@@ -10,6 +10,9 @@ public:
   // Top Level Config Schemas
   static const std::string TOP_LEVEL_CONFIG_SCHEMA;
 
+  // Access log Schema
+  static const std::string ACCESS_LOG_SCHEMA;
+
   // Listener Schema
   static const std::string LISTENER_SCHEMA;
   static const std::string LDS_SCHEMA;
@@ -30,6 +33,7 @@ public:
   static const std::string HTTP_RATE_LIMITS_CONFIGURATION_SCHEMA;
   static const std::string RDS_CONFIGURATION_SCHEMA;
   static const std::string HEADER_DATA_CONFIGURATION_SCHEMA;
+  static const std::string QUERY_PARAMETER_CONFIGURATION_SCHEMA;
 
   // HTTP Filter Schemas
   static const std::string BUFFER_HTTP_FILTER_SCHEMA;
@@ -39,6 +43,7 @@ public:
   static const std::string IP_TAGGING_HTTP_FILTER_SCHEMA;
   static const std::string RATE_LIMIT_HTTP_FILTER_SCHEMA;
   static const std::string ROUTER_HTTP_FILTER_SCHEMA;
+  static const std::string LUA_HTTP_FILTER_SCHEMA;
 
   // Cluster Schemas
   static const std::string CLUSTER_MANAGER_SCHEMA;

@@ -59,9 +59,11 @@ envoy_cc_test(
     name = "hot_restart_impl_test",
     srcs = envoy_select_hot_restart(["hot_restart_impl_test.cc"]),
     deps = [
+        "//source/common/api:os_sys_calls_lib",
         "//source/common/stats:stats_lib",
         "//source/server:hot_restart_lib",
         "//test/mocks/server:server_mocks",
+        "//test/test_common:threadsafe_singleton_injector_lib",
     ],
 )
 
@@ -101,10 +103,14 @@ envoy_cc_test(
 envoy_cc_test(
     name = "lds_api_test",
     srcs = ["lds_api_test.cc"],
+    data = [
+        "//test/config/integration/certs",
+    ],
     deps = [
         "//source/common/config:utility_lib",
         "//source/server:lds_api_lib",
         "//test/mocks/server:server_mocks",
+        "//test/test_common:environment_lib",
         "//test/test_common:utility_lib",
     ],
 )
@@ -116,6 +122,7 @@ envoy_cc_test(
     deps = [
         ":utility_lib",
         "//source/server:listener_manager_lib",
+        "//source/server/config/network:http_connection_manager_lib",
         "//test/mocks/server:server_mocks",
         "//test/test_common:environment_lib",
     ],
@@ -125,6 +132,7 @@ envoy_cc_test(
     name = "server_test",
     srcs = ["server_test.cc"],
     data = [
+        ":empty_bootstrap.yaml",
         ":node_bootstrap.yaml",
         "//test/config/integration:server.json",
         "//test/config/integration:server_config_files",

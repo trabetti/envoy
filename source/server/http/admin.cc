@@ -13,13 +13,13 @@
 #include "envoy/upstream/cluster_manager.h"
 #include "envoy/upstream/upstream.h"
 
+#include "common/access_log/access_log_formatter.h"
+#include "common/access_log/access_log_impl.h"
 #include "common/buffer/buffer_impl.h"
 #include "common/common/assert.h"
 #include "common/common/enum_to_int.h"
 #include "common/common/utility.h"
 #include "common/common/version.h"
-#include "common/http/access_log/access_log_formatter.h"
-#include "common/http/access_log/access_log_impl.h"
 #include "common/http/codes.h"
 #include "common/http/header_map_impl.h"
 #include "common/http/headers.h"
@@ -279,35 +279,218 @@ Http::Code AdminImpl::handlerServerInfo(const std::string&, Buffer::Instance& re
 }
 
 Http::Code AdminImpl::handlerStats(const std::string& url, Buffer::Instance& response) {
-	// We currently don't support timers locally (only via statsd) so just group all the counters
-	// and gauges together, alpha sort them, and spit them out.
+  // We currently don't support timers locally (only via statsd) so just group all the counters
+  // and gauges together, alpha sort them, and spit them out.
+  Http::Code rc = Http::Code::OK;
+  const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
+  std::map<std::string, uint64_t> all_stats;
+  for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
+    all_stats.emplace(counter->name(), counter->value());
+  }
+
+  for (const Stats::GaugeSharedPtr& gauge : server_.stats().gauges()) {
+    all_stats.emplace(gauge->name(), gauge->value());
+  }
+
+  if (params.size() == 0) {
+    // No Arguments so use the standard.
+    for (auto stat : all_stats) {
+      response.add(fmt::format("{}: {}\n", stat.first, stat.second));
+    }
+  } else {
+    const std::string format_key = params.begin()->first;
+    const std::string format_value = params.begin()->second;
+    if (format_key == "format" && format_value == "json") {
+      response.add(AdminImpl::statsAsJson(all_stats));
+    } else if (format_key == "format" && format_value == "prometheus") {
+      AdminImpl::statsAsPrometheus(server_.stats().counters(), server_.stats().gauges(), response);
+    } else {
+      response.add("usage: /stats?format=json \n");
+      response.add("\n");
+      rc = Http::Code::NotFound;
+    }
+  }
+  return rc;
+}
+
+std::string AdminImpl::sanitizePrometheusName(const std::string& name) {
+  std::string stats_name = name;
+  std::replace(stats_name.begin(), stats_name.end(), '.', '_');
+  return stats_name;
+}
+
+std::string AdminImpl::formatTagsForPrometheus(const std::vector<Stats::Tag>& tags) {
+  std::vector<std::string> buf;
+  for (const Stats::Tag& tag : tags) {
+    buf.push_back(fmt::format("{}=\"{}\"", sanitizePrometheusName(tag.name_),
+                              sanitizePrometheusName(tag.value_)));
+  }
+  return StringUtil::join(buf, ",");
+}
+
+std::string AdminImpl::prometheusMetricName(const std::string& extractedName) {
+  // Add namespacing prefix to avoid conflicts, as per best practice:
+  // https://prometheus.io/docs/practices/naming/#metric-names
+  return fmt::format("envoy_{0}", sanitizePrometheusName(extractedName));
+}
+
+void AdminImpl::statsAsPrometheus(const std::list<Stats::CounterSharedPtr>& counters,
+                                  const std::list<Stats::GaugeSharedPtr>& gauges,
+                                  Buffer::Instance& response) {
+  for (const auto& counter : counters) {
+    const std::string tags = formatTagsForPrometheus(counter->tags());
+    const std::string metric_name = prometheusMetricName(counter->tagExtractedName());
+    response.add(fmt::format("# TYPE {0} counter\n", metric_name));
+    response.add(fmt::format("{0}{{{1}}} {2}\n", metric_name, tags, counter->value()));
+  }
+
+  for (const auto& gauge : gauges) {
+    const std::string tags = formatTagsForPrometheus(gauge->tags());
+    const std::string metric_name = prometheusMetricName(gauge->tagExtractedName());
+    response.add(fmt::format("# TYPE {0} gauge\n", metric_name));
+    response.add(fmt::format("{0}{{{1}}} {2}\n", metric_name, tags, gauge->value()));
+  }
+}
+
+std::string AdminImpl::statsAsJson(const std::map<std::string, uint64_t>& all_stats) {
+  rapidjson::Document document;
+  document.SetObject();
+  rapidjson::Value stats_array(rapidjson::kArrayType);
+  rapidjson::Document::AllocatorType& allocator = document.GetAllocator();
+  for (auto stat : all_stats) {
+    Value stat_obj;
+    stat_obj.SetObject();
+    Value stat_name;
+    stat_name.SetString(stat.first.c_str(), allocator);
+    stat_obj.AddMember("name", stat_name, allocator);
+    Value stat_value;
+    stat_value.SetInt(stat.second);
+    stat_obj.AddMember("value", stat_value, allocator);
+    stats_array.PushBack(stat_obj, allocator);
+  }
+  document.AddMember("stats", stats_array, allocator);
+  rapidjson::StringBuffer strbuf;
+  rapidjson::PrettyWriter<StringBuffer> writer(strbuf);
+  document.Accept(writer);
+  return strbuf.GetString();
+}
+
+std::string AdminImpl::BuildEventStream(const std::map<std::string, std::string>& all_stats) {
+	//  rapidjson::Document document;
+	//  document.SetObject();
+	// // rapidjson::Value stats_array(rapidjson::kArrayType);
+	//  rapidjson::Value stats_array(rapidjson::kStringType);
+	// rapidjson::Document::AllocatorType& allocator = document.GetAllocator();
+	//  for (auto stat : all_stats) {
+	//    Value stat_obj;
+	//    stat_obj.SetObject();
+	//    Value stat_name;
+	//    stat_name.SetString(stat.first.c_str(), allocator);
+	//    stat_obj.AddMember("name", stat_name, allocator);
+	//    Value stat_value;
+	//    stat_value.SetString(stat.second.c_str(), allocator);
+	//    stat_obj.AddMember("value", stat_value, allocator);
+	//    stats_array.PushBack(stat_obj, allocator);
+	//  }
+	//  document.AddMember("stats", stats_array, allocator);
+	//  rapidjson::StringBuffer strbuf;
+	//  rapidjson::PrettyWriter<StringBuffer> writer(strbuf);
+	//  document.Accept(writer);
+	//  return strbuf.GetString();
+
+
+
+	rapidjson::StringBuffer s;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(s);
+	writer.StartObject();
+	for (auto stat : all_stats) {
+		writer.Key(stat.first.c_str());
+		writer.String(stat.second.c_str());
+	}
+	writer.EndObject();
+	std::string json_string = s.GetString();
+
+	return json_string;
+
+}
+
+Http::Code AdminImpl::handlerQuitQuitQuit(const std::string&, Buffer::Instance& response) {
+	server_.shutdown();
+	response.add("OK\n");
+	return Http::Code::OK;
+}
+
+Http::Code AdminImpl::handlerListenerInfo(const std::string&, Buffer::Instance& response) {
+	std::list<std::string> listeners;
+	for (auto listener : server_.listenerManager().listeners()) {
+		listeners.push_back(listener.get().socket().localAddress()->asString());
+	}
+	response.add(Json::Factory::listAsJsonString(listeners));
+	return Http::Code::OK;
+}
+
+Http::Code AdminImpl::handlerCerts(const std::string&, Buffer::Instance& response) {
+	// This set is used to track distinct certificates. We may have multiple listeners, upstreams, etc
+	// using the same cert.
+	std::unordered_set<std::string> context_info_set;
+	std::string context_format = "{{\n\t\"ca_cert\": \"{}\",\n\t\"cert_chain\": \"{}\"\n}}\n";
+	server_.sslContextManager().iterateContexts([&](Ssl::Context& context) -> void {
+		context_info_set.insert(fmt::format(context_format, context.getCaCertInformation(),
+				context.getCertChainInformation()));
+	});
+
+	std::string cert_result_string;
+	for (const std::string& context_info : context_info_set) {
+		cert_result_string += context_info;
+	}
+	response.add(cert_result_string);
+	return Http::Code::OK;
+}
+
+Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks) {
 	Http::Code rc = Http::Code::OK;
 	const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
 	std::map<std::string, uint64_t> all_stats;
-	for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
-		all_stats.emplace(counter->name(), counter->value());
+
+	Stats::HystrixStats& stats = server_.hystrixStats();
+	stats.incCounter();
+
+//	hystrix_data_timer_ =
+//			callbacks->dispatcher().createTimer([this]() -> void { addHystrixCommand(stats, response); });
+//    const auto ms = std::chrono::milliseconds(5000);
+//    hystrix_data_timer_->enableTimer(ms);
+
+	hystrix_ping_timer_ =
+			callbacks->dispatcher().createTimer([this]() -> void {
+		std::cout << "ping!" << std::endl;
+	    const auto ms = std::chrono::milliseconds(3000);
+		hystrix_ping_timer_->enableTimer(ms);
+	});
+
+	const auto ms3 = std::chrono::milliseconds(3000);
+    hystrix_ping_timer_->enableTimer(ms3);
+
+    for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
+		if (counter->name().find("upstream_rq_") != std::string::npos) {
+			std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
+			stats.pushNewValue(counter->name(), counter->value());
+		}
 	}
 
-	for (const Stats::GaugeSharedPtr& gauge : server_.stats().gauges()) {
-		all_stats.emplace(gauge->name(), gauge->value());
-	}
+	// I think there are no interesting gauges
+	//	for (const Stats::GaugeSharedPtr& gauge : server_.stats().gauges()) {
+	//		if (gauge->name().find("rq") != std::string::npos) {
+	//			std::cout << "gauge name: " << gauge->name() << ", gauge value: " << gauge->value() << std::endl;
+	//			accumulateCounters(gauge, all_stats);
+	//		}
+	//	}
 
-	if (params.size() == 0) {
-		// No Arguments so use the standard.
-		for (auto stat : all_stats) {
-			response.add(fmt::format("{}: {}\n", stat.first, stat.second));
-		}
-	} else {
-		const std::string format_key = params.begin()->first;
-		const std::string format_value = params.begin()->second;
-		if (format_key == "format" && format_value == "json") {
-			response.add(statsAsJson(all_stats));
-		} else {
-			response.add("usage: /stats?format=json \n");
-			response.add("\n");
-			rc = Http::Code::NotFound;
-		}
-	}
+	std::cout << "done reading counters" << std::endl;
+
+	addHystrixCommand(stats, response);
+	addHystrixThreadPool(response);
+	stats.printRollingWindow();
+
 	return rc;
 }
 
@@ -448,149 +631,6 @@ void AdminImpl::addHystrixCommand(Stats::HystrixStats& stats, Buffer::Instance& 
 
 }
 
-Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks) {
-	Http::Code rc = Http::Code::OK;
-	const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
-	std::map<std::string, uint64_t> all_stats;
-
-	Stats::HystrixStats& stats = server_.hystrixStats();
-	stats.incCounter();
-
-//	hystrix_data_timer_ =
-//			callbacks->dispatcher().createTimer([this]() -> void { addHystrixCommand(stats, response); });
-//    const auto ms = std::chrono::milliseconds(5000);
-//    hystrix_data_timer_->enableTimer(ms);
-
-	hystrix_ping_timer_ =
-			callbacks->dispatcher().createTimer([this]() -> void {
-		std::cout << "ping!" << std::endl;
-	    const auto ms = std::chrono::milliseconds(3000);
-		hystrix_ping_timer_->enableTimer(ms);
-	});
-
-	const auto ms3 = std::chrono::milliseconds(3000);
-    hystrix_ping_timer_->enableTimer(ms3);
-
-    for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
-		if (counter->name().find("upstream_rq_") != std::string::npos) {
-			std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
-			stats.pushNewValue(counter->name(), counter->value());
-		}
-	}
-
-	// I think there are no interesting gauges
-	//	for (const Stats::GaugeSharedPtr& gauge : server_.stats().gauges()) {
-	//		if (gauge->name().find("rq") != std::string::npos) {
-	//			std::cout << "gauge name: " << gauge->name() << ", gauge value: " << gauge->value() << std::endl;
-	//			accumulateCounters(gauge, all_stats);
-	//		}
-	//	}
-
-	std::cout << "done reading counters" << std::endl;
-
-	addHystrixCommand(stats, response);
-	addHystrixThreadPool(response);
-
-	stats.printRollingWindow();
-
-	return rc;
-}
-
-
-std::string AdminImpl::statsAsJson(const std::map<std::string, uint64_t>& all_stats) {
-	rapidjson::Document document;
-	document.SetObject();
-	rapidjson::Value stats_array(rapidjson::kArrayType);
-	rapidjson::Document::AllocatorType& allocator = document.GetAllocator();
-	for (auto stat : all_stats) {
-		Value stat_obj;
-		stat_obj.SetObject();
-		Value stat_name;
-		stat_name.SetString(stat.first.c_str(), allocator);
-		stat_obj.AddMember("name", stat_name, allocator);
-		Value stat_value;
-		stat_value.SetInt(stat.second);
-		stat_obj.AddMember("value", stat_value, allocator);
-		stats_array.PushBack(stat_obj, allocator);
-	}
-	document.AddMember("stats", stats_array, allocator);
-	rapidjson::StringBuffer strbuf;
-	rapidjson::PrettyWriter<StringBuffer> writer(strbuf);
-	document.Accept(writer);
-	return strbuf.GetString();
-}
-
-std::string AdminImpl::BuildEventStream(const std::map<std::string, std::string>& all_stats) {
-	//  rapidjson::Document document;
-	//  document.SetObject();
-	// // rapidjson::Value stats_array(rapidjson::kArrayType);
-	//  rapidjson::Value stats_array(rapidjson::kStringType);
-	// rapidjson::Document::AllocatorType& allocator = document.GetAllocator();
-	//  for (auto stat : all_stats) {
-	//    Value stat_obj;
-	//    stat_obj.SetObject();
-	//    Value stat_name;
-	//    stat_name.SetString(stat.first.c_str(), allocator);
-	//    stat_obj.AddMember("name", stat_name, allocator);
-	//    Value stat_value;
-	//    stat_value.SetString(stat.second.c_str(), allocator);
-	//    stat_obj.AddMember("value", stat_value, allocator);
-	//    stats_array.PushBack(stat_obj, allocator);
-	//  }
-	//  document.AddMember("stats", stats_array, allocator);
-	//  rapidjson::StringBuffer strbuf;
-	//  rapidjson::PrettyWriter<StringBuffer> writer(strbuf);
-	//  document.Accept(writer);
-	//  return strbuf.GetString();
-
-
-
-	rapidjson::StringBuffer s;
-	rapidjson::Writer<rapidjson::StringBuffer> writer(s);
-	writer.StartObject();
-	for (auto stat : all_stats) {
-		writer.Key(stat.first.c_str());
-		writer.String(stat.second.c_str());
-	}
-	writer.EndObject();
-	std::string json_string = s.GetString();
-
-	return json_string;
-
-}
-
-Http::Code AdminImpl::handlerQuitQuitQuit(const std::string&, Buffer::Instance& response) {
-	server_.shutdown();
-	response.add("OK\n");
-	return Http::Code::OK;
-}
-
-Http::Code AdminImpl::handlerListenerInfo(const std::string&, Buffer::Instance& response) {
-	std::list<std::string> listeners;
-	for (auto listener : server_.listenerManager().listeners()) {
-		listeners.push_back(listener.get().socket().localAddress()->asString());
-	}
-	response.add(Json::Factory::listAsJsonString(listeners));
-	return Http::Code::OK;
-}
-
-Http::Code AdminImpl::handlerCerts(const std::string&, Buffer::Instance& response) {
-	// This set is used to track distinct certificates. We may have multiple listeners, upstreams, etc
-	// using the same cert.
-	std::unordered_set<std::string> context_info_set;
-	std::string context_format = "{{\n\t\"ca_cert\": \"{}\",\n\t\"cert_chain\": \"{}\"\n}}\n";
-	server_.sslContextManager().iterateContexts([&](Ssl::Context& context) -> void {
-		context_info_set.insert(fmt::format(context_format, context.getCaCertInformation(),
-				context.getCertChainInformation()));
-	});
-
-	std::string cert_result_string;
-	for (const std::string& context_info : context_info_set) {
-		cert_result_string += context_info;
-	}
-	response.add(cert_result_string);
-	return Http::Code::OK;
-}
 
 void AdminFilter::onComplete() {
 	std::string path = request_headers_->Path()->value().c_str();

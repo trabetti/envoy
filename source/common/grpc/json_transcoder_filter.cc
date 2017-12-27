@@ -55,13 +55,13 @@ public:
         response_stream_(response_translator_->CreateInputStream()) {}
 
   // Transcoder
-  ::google::grpc::transcoding::TranscoderInputStream* RequestOutput() {
+  ::google::grpc::transcoding::TranscoderInputStream* RequestOutput() override {
     return request_stream_.get();
   }
-  ProtobufUtil::Status RequestStatus() { return request_translator_->Output().Status(); }
+  ProtobufUtil::Status RequestStatus() override { return request_translator_->Output().Status(); }
 
-  ZeroCopyInputStream* ResponseOutput() { return response_stream_.get(); }
-  ProtobufUtil::Status ResponseStatus() { return response_translator_->Status(); }
+  ZeroCopyInputStream* ResponseOutput() override { return response_stream_.get(); }
+  ProtobufUtil::Status ResponseStatus() override { return response_translator_->Status(); }
 
 private:
   std::unique_ptr<JsonRequestTranslator> request_translator_;
@@ -72,11 +72,24 @@ private:
 
 } // namespace
 
-JsonTranscoderConfig::JsonTranscoderConfig(const Json::Object& config) {
-  const std::string proto_descriptor_file = config.getString("proto_descriptor");
+JsonTranscoderConfig::JsonTranscoderConfig(
+    const envoy::api::v2::filter::http::GrpcJsonTranscoder& proto_config) {
   FileDescriptorSet descriptor_set;
-  if (!descriptor_set.ParseFromString(Filesystem::fileReadToEnd(proto_descriptor_file))) {
-    throw EnvoyException("transcoding_filter: Unable to parse proto descriptor");
+
+  switch (proto_config.descriptor_set_case()) {
+  case envoy::api::v2::filter::http::GrpcJsonTranscoder::kProtoDescriptor:
+    if (!descriptor_set.ParseFromString(
+            Filesystem::fileReadToEnd(proto_config.proto_descriptor()))) {
+      throw EnvoyException("transcoding_filter: Unable to parse proto descriptor");
+    }
+    break;
+  case envoy::api::v2::filter::http::GrpcJsonTranscoder::kProtoDescriptorBin:
+    if (!descriptor_set.ParseFromString(proto_config.proto_descriptor_bin())) {
+      throw EnvoyException("transcoding_filter: Unable to parse proto descriptor");
+    }
+    break;
+  default:
+    NOT_REACHED;
   }
 
   for (const auto& file : descriptor_set.file()) {
@@ -87,7 +100,7 @@ JsonTranscoderConfig::JsonTranscoderConfig(const Json::Object& config) {
 
   PathMatcherBuilder<const Protobuf::MethodDescriptor*> pmb;
 
-  for (const auto& service_name : config.getStringArray("services")) {
+  for (const auto& service_name : proto_config.services()) {
     auto service = descriptor_pool_.FindServiceByName(service_name);
     if (service == nullptr) {
       throw EnvoyException("transcoding_filter: Could not find '" + service_name +
@@ -109,14 +122,11 @@ JsonTranscoderConfig::JsonTranscoderConfig(const Json::Object& config) {
       new google::grpc::transcoding::TypeHelper(Protobuf::util::NewTypeResolverForDescriptorPool(
           Common::typeUrlPrefix(), &descriptor_pool_)));
 
-  const auto print_config = config.getObject("print_options", true);
-  print_options_.add_whitespace = print_config->getBoolean("add_whitespace", false);
-  print_options_.always_print_primitive_fields =
-      print_config->getBoolean("always_print_primitive_fields", false);
-  print_options_.always_print_enums_as_ints =
-      print_config->getBoolean("always_print_enums_as_ints", false);
-  print_options_.preserve_proto_field_names =
-      print_config->getBoolean("preserve_proto_field_names", false);
+  const auto print_config = proto_config.print_options();
+  print_options_.add_whitespace = print_config.add_whitespace();
+  print_options_.always_print_primitive_fields = print_config.always_print_primitive_fields();
+  print_options_.always_print_enums_as_ints = print_config.always_print_enums_as_ints();
+  print_options_.preserve_proto_field_names = print_config.preserve_proto_field_names();
 }
 
 ProtobufUtil::Status JsonTranscoderConfig::createTranscoder(
@@ -133,7 +143,7 @@ ProtobufUtil::Status JsonTranscoderConfig::createTranscoder(
     path = path.substr(0, pos);
   }
 
-  RequestInfo request_info;
+  struct RequestInfo request_info;
   std::vector<VariableBinding> variable_bindings;
   method_descriptor =
       path_matcher_->Lookup(method, path, args, &variable_bindings, &request_info.body_field_path);
@@ -290,10 +300,19 @@ Http::FilterHeadersStatus JsonTranscoderFilter::encodeHeaders(Http::HeaderMap& h
   }
 
   response_headers_ = &headers;
+
+  if (end_stream) {
+    // In gRPC wire protocol, headers frame with end_stream is a trailers-only response.
+    // The return value from encodeTrailers is ignored since it is always continue.
+    encodeTrailers(headers);
+    return Http::FilterHeadersStatus::Continue;
+  }
+
   headers.insertContentType().value().setReference(Http::Headers::get().ContentTypeValues.Json);
-  if (!method_->server_streaming() && !end_stream) {
+  if (!method_->server_streaming()) {
     return Http::FilterHeadersStatus::StopIteration;
   }
+
   return Http::FilterHeadersStatus::Continue;
 }
 
@@ -338,13 +357,12 @@ Http::FilterTrailersStatus JsonTranscoderFilter::encodeTrailers(Http::HeaderMap&
     return Http::FilterTrailersStatus::Continue;
   }
 
-  const Http::HeaderEntry* grpc_status_header = trailers.GrpcStatus();
-  if (grpc_status_header) {
-    uint64_t grpc_status_code;
-    if (!StringUtil::atoul(grpc_status_header->value().c_str(), grpc_status_code)) {
-      response_headers_->Status()->value(enumToInt(Http::Code::ServiceUnavailable));
-    }
-    response_headers_->insertGrpcStatus().value(*grpc_status_header);
+  const Optional<Status::GrpcStatus> grpc_status = Common::getGrpcStatus(trailers);
+  if (!grpc_status.valid() || grpc_status.value() == Status::GrpcStatus::InvalidCode) {
+    response_headers_->Status()->value(enumToInt(Http::Code::ServiceUnavailable));
+  } else {
+    response_headers_->Status()->value(Common::grpcToHttpStatus(grpc_status.value()));
+    response_headers_->insertGrpcStatus().value(enumToInt(grpc_status.value()));
   }
 
   const Http::HeaderEntry* grpc_message_header = trailers.GrpcMessage();

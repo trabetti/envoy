@@ -20,6 +20,7 @@
 #include "common/tracing/http_tracer_impl.h"
 
 #include "api/lds.pb.h"
+#include "api/trace.pb.h"
 #include "fmt/format.h"
 
 namespace Envoy {
@@ -44,7 +45,7 @@ void MainImpl::initialize(const envoy::api::v2::Bootstrap& bootstrap, Instance& 
   const auto& listeners = bootstrap.static_resources().listeners();
   ENVOY_LOG(info, "loading {} listener(s)", listeners.size());
   for (ssize_t i = 0; i < listeners.size(); i++) {
-    ENVOY_LOG(info, "listener #{}:", i);
+    ENVOY_LOG(debug, "listener #{}:", i);
     server.listenerManager().addOrUpdateListener(listeners[i]);
   }
 

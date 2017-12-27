@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <tuple>
 
 #include "envoy/http/codec.h"
 #include "envoy/http/codes.h"
@@ -12,14 +11,19 @@
 #include "envoy/local_info/local_info.h"
 #include "envoy/router/shadow_writer.h"
 #include "envoy/runtime/runtime.h"
+#include "envoy/server/filter_config.h"
 #include "envoy/stats/stats_macros.h"
 #include "envoy/upstream/cluster_manager.h"
 
+#include "common/access_log/access_log_impl.h"
 #include "common/buffer/watermark_buffer.h"
 #include "common/common/hash.h"
 #include "common/common/hex.h"
 #include "common/common/logger.h"
 #include "common/http/utility.h"
+#include "common/request_info/request_info_impl.h"
+
+#include "api/filter/http/router.pb.h"
 
 namespace Envoy {
 namespace Router {
@@ -85,10 +89,22 @@ public:
   FilterConfig(const std::string& stat_prefix, const LocalInfo::LocalInfo& local_info,
                Stats::Scope& scope, Upstream::ClusterManager& cm, Runtime::Loader& runtime,
                Runtime::RandomGenerator& random, ShadowWriterPtr&& shadow_writer,
-               bool emit_dynamic_stats)
+               bool emit_dynamic_stats, bool start_child_span)
       : scope_(scope), local_info_(local_info), cm_(cm), runtime_(runtime),
         random_(random), stats_{ALL_ROUTER_STATS(POOL_COUNTER_PREFIX(scope, stat_prefix))},
-        emit_dynamic_stats_(emit_dynamic_stats), shadow_writer_(std::move(shadow_writer)) {}
+        emit_dynamic_stats_(emit_dynamic_stats), start_child_span_(start_child_span),
+        shadow_writer_(std::move(shadow_writer)) {}
+
+  FilterConfig(const std::string& stat_prefix, Server::Configuration::FactoryContext& context,
+               ShadowWriterPtr&& shadow_writer, const envoy::api::v2::filter::http::Router& config)
+      : FilterConfig(stat_prefix, context.localInfo(), context.scope(), context.clusterManager(),
+                     context.runtime(), context.random(), std::move(shadow_writer),
+                     PROTOBUF_GET_WRAPPED_OR_DEFAULT(config, dynamic_stats, true),
+                     config.start_child_span()) {
+    for (const auto& upstream_log : config.upstream_log()) {
+      upstream_logs_.push_back(AccessLog::AccessLogFactory::fromProto(upstream_log, context));
+    }
+  }
 
   ShadowWriter& shadowWriter() { return *shadow_writer_; }
 
@@ -99,6 +115,8 @@ public:
   Runtime::RandomGenerator& random_;
   FilterStats stats_;
   const bool emit_dynamic_stats_;
+  const bool start_child_span_;
+  std::list<AccessLog::InstanceSharedPtr> upstream_logs_;
 
 private:
   ShadowWriterPtr shadow_writer_;
@@ -134,7 +152,7 @@ public:
       auto hash_policy = route_entry_->hashPolicy();
       if (hash_policy) {
         return hash_policy->generateHash(
-            callbacks_->downstreamAddress(), *downstream_headers_,
+            callbacks_->requestInfo().downstreamRemoteAddress()->asString(), *downstream_headers_,
             [this](const std::string& key, std::chrono::seconds max_age) {
               return addDownstreamSetCookie(key, max_age);
             });
@@ -165,8 +183,8 @@ public:
     // connections can receive different cookies if they race on requests.
     std::string value;
     const Network::Connection* conn = downstreamConnection();
-    // need to check for null conn if this is ever used by Http::AsyncClient in the fiture
-    value = conn->remoteAddress().asString() + conn->localAddress().asString();
+    // Need to check for null conn if this is ever used by Http::AsyncClient in the future.
+    value = conn->remoteAddress()->asString() + conn->localAddress()->asString();
 
     const std::string cookie_value = Hex::uint64ToHex(HashUtil::xxHash64(value));
     downstream_set_cookies_.emplace_back(
@@ -181,11 +199,7 @@ private:
   struct UpstreamRequest : public Http::StreamDecoder,
                            public Http::StreamCallbacks,
                            public Http::ConnectionPool::Callbacks {
-    UpstreamRequest(Filter& parent, Http::ConnectionPool::Instance& pool)
-        : parent_(parent), conn_pool_(pool), grpc_rq_success_deferred_(false),
-          calling_encode_headers_(false), upstream_canary_(false), encode_complete_(false),
-          encode_trailers_(false) {}
-
+    UpstreamRequest(Filter& parent, Http::ConnectionPool::Instance& pool);
     ~UpstreamRequest();
 
     void encodeHeaders(bool end_stream);
@@ -196,6 +210,7 @@ private:
     void onPerTryTimeout();
 
     void onUpstreamHostSelected(Upstream::HostDescriptionConstSharedPtr host) {
+      request_info_.onUpstreamHostSelected(host);
       upstream_host_ = host;
       parent_.callbacks_->requestInfo().onUpstreamHostSelected(host);
     }
@@ -250,6 +265,9 @@ private:
     Buffer::WatermarkBufferPtr buffered_request_body_;
     Upstream::HostDescriptionConstSharedPtr upstream_host_;
     DownstreamWatermarkManager downstream_watermark_manager_{*this};
+    Tracing::SpanPtr span_;
+    RequestInfo::RequestInfoImpl request_info_;
+    Http::HeaderMap* upstream_headers_{};
 
     bool calling_encode_headers_ : 1;
     bool upstream_canary_ : 1;
@@ -261,8 +279,7 @@ private:
 
   enum class UpstreamResetType { Reset, GlobalTimeout, PerTryTimeout };
 
-  Http::AccessLog::ResponseFlag
-  streamResetReasonToResponseFlag(Http::StreamResetReason reset_reason);
+  RequestInfo::ResponseFlag streamResetReasonToResponseFlag(Http::StreamResetReason reset_reason);
 
   static const std::string upstreamZone(Upstream::HostDescriptionConstSharedPtr upstream_host);
   void chargeUpstreamCode(uint64_t response_status_code, const Http::HeaderMap& response_headers,
@@ -280,7 +297,7 @@ private:
   void maybeDoShadowing();
   void onRequestComplete();
   void onResponseTimeout();
-  void onUpstreamHeaders(Http::HeaderMapPtr&& headers, bool end_stream);
+  void onUpstreamHeaders(uint64_t response_code, Http::HeaderMapPtr&& headers, bool end_stream);
   void onUpstreamData(Buffer::Instance& data, bool end_stream);
   void onUpstreamTrailers(Http::HeaderMapPtr&& trailers);
   void onUpstreamComplete();

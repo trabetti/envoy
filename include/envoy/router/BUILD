@@ -17,7 +17,7 @@ envoy_cc_library(
 envoy_cc_library(
     name = "route_config_provider_manager_interface",
     hdrs = ["route_config_provider_manager.h"],
-    external_deps = ["envoy_filter_http_connection_manager"],
+    external_deps = ["envoy_filter_network_http_connection_manager"],
     deps = [
         ":rds_interface",
         "//include/envoy/event:dispatcher_interface",
@@ -35,9 +35,10 @@ envoy_cc_library(
     name = "router_interface",
     hdrs = ["router.h"],
     deps = [
+        "//include/envoy/access_log:access_log_interface",
         "//include/envoy/common:optional",
-        "//include/envoy/http:access_log_interface",
         "//include/envoy/http:codec_interface",
+        "//include/envoy/http:codes_interface",
         "//include/envoy/http:header_map_interface",
         "//include/envoy/tracing:http_tracer_interface",
         "//include/envoy/upstream:resource_manager_interface",

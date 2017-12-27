@@ -12,6 +12,7 @@
 #include "test/test_common/printers.h"
 #include "test/test_common/utility.h"
 
+#include "api/filter/network/http_connection_manager.pb.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "integration.h"
@@ -20,21 +21,6 @@
 
 namespace Envoy {
 namespace Xfcc {
-
-void XfccIntegrationTest::initialize() {
-  BaseIntegrationTest::initialize();
-  runtime_.reset(new NiceMock<Runtime::MockLoader>());
-  context_manager_.reset(new Ssl::ContextManagerImpl(*runtime_));
-  upstream_ssl_ctx_ = createUpstreamSslContext();
-  fake_upstreams_.emplace_back(
-      new FakeUpstream(upstream_ssl_ctx_.get(), 0, FakeHttpConnection::Type::HTTP1, version_));
-  registerPort("upstream_0", fake_upstreams_.back()->localAddress()->ip()->port());
-  fake_upstreams_.emplace_back(
-      new FakeUpstream(upstream_ssl_ctx_.get(), 0, FakeHttpConnection::Type::HTTP1, version_));
-  registerPort("upstream_1", fake_upstreams_.back()->localAddress()->ip()->port());
-  client_tls_ssl_ctx_ = createClientSslContext(false);
-  client_mtls_ssl_ctx_ = createClientSslContext(true);
-}
 
 void XfccIntegrationTest::TearDown() {
   test_server_.reset();
@@ -85,45 +71,59 @@ Ssl::ServerContextPtr XfccIntegrationTest::createUpstreamSslContext() {
   Json::ObjectSharedPtr loader = TestEnvironment::jsonLoadFromString(json);
   Ssl::ServerContextConfigImpl cfg(*loader);
   static auto* upstream_stats_store = new Stats::TestIsolatedStoreImpl();
-  return context_manager_->createSslServerContext(*upstream_stats_store, cfg);
+  return context_manager_->createSslServerContext("", {}, *upstream_stats_store, cfg, true);
 }
 
 Network::ClientConnectionPtr XfccIntegrationTest::makeClientConnection() {
   Network::Address::InstanceConstSharedPtr address =
       Network::Utility::resolveUrl("tcp://" + Network::Test::getLoopbackAddressUrlString(version_) +
-                                   ":" + std::to_string(lookupPort("plain")));
+                                   ":" + std::to_string(lookupPort("http")));
   return dispatcher_->createClientConnection(address, Network::Address::InstanceConstSharedPtr());
-}
-
-Network::ClientConnectionPtr XfccIntegrationTest::makeTlsClientConnection() {
-  Network::Address::InstanceConstSharedPtr address =
-      Network::Utility::resolveUrl("tcp://" + Network::Test::getLoopbackAddressUrlString(version_) +
-                                   ":" + std::to_string(lookupPort("ssl")));
-  return dispatcher_->createSslClientConnection(*client_tls_ssl_ctx_, address,
-                                                Network::Address::InstanceConstSharedPtr());
 }
 
 Network::ClientConnectionPtr XfccIntegrationTest::makeMtlsClientConnection() {
   Network::Address::InstanceConstSharedPtr address =
       Network::Utility::resolveUrl("tcp://" + Network::Test::getLoopbackAddressUrlString(version_) +
-                                   ":" + std::to_string(lookupPort("ssl")));
+                                   ":" + std::to_string(lookupPort("http")));
   return dispatcher_->createSslClientConnection(*client_mtls_ssl_ctx_, address,
                                                 Network::Address::InstanceConstSharedPtr());
 }
 
-void XfccIntegrationTest::startTestServerWithXfccConfig(std::string fcc, std::string sccd) {
-  TestEnvironment::ParamMap param_map;
-  param_map["forward_client_cert"] = fcc;
-  param_map["set_current_client_cert_details"] = sccd;
-  std::string config = TestEnvironment::temporaryFileSubstitute(
-      "test/config/integration/server_xfcc.json", param_map, port_map_, version_);
-  test_server_ = IntegrationTestServer::create(config, version_);
-  registerTestServerPorts({"ssl", "plain"});
+void XfccIntegrationTest::createUpstreams() {
+  upstream_ssl_ctx_ = createUpstreamSslContext();
+  fake_upstreams_.emplace_back(
+      new FakeUpstream(upstream_ssl_ctx_.get(), 0, FakeHttpConnection::Type::HTTP1, version_));
 }
 
-void XfccIntegrationTest::testRequestAndResponseWithXfccHeader(Network::ClientConnectionPtr&& conn,
-                                                               std::string previous_xfcc,
+void XfccIntegrationTest::initialize() {
+  config_helper_.addConfigModifier(
+      [&](envoy::api::v2::filter::network::HttpConnectionManager& hcm) -> void {
+        hcm.set_forward_client_cert_details(fcc_);
+        hcm.mutable_set_current_client_cert_details()->CopyFrom(sccd_);
+      });
+
+  config_helper_.addConfigModifier([&](envoy::api::v2::Bootstrap& bootstrap) -> void {
+    auto context = bootstrap.mutable_static_resources()->mutable_clusters(0)->mutable_tls_context();
+    auto* validation_context = context->mutable_common_tls_context()->mutable_validation_context();
+    validation_context->mutable_trusted_ca()->set_filename(
+        TestEnvironment::runfilesPath("test/config/integration/certs/upstreamcacert.pem"));
+    validation_context->add_verify_subject_alt_name("foo.lyft.com");
+  });
+
+  if (tls_) {
+    config_helper_.addSslConfig();
+  }
+
+  runtime_.reset(new NiceMock<Runtime::MockLoader>());
+  context_manager_.reset(new Ssl::ContextManagerImpl(*runtime_));
+  client_tls_ssl_ctx_ = createClientSslContext(false);
+  client_mtls_ssl_ctx_ = createClientSslContext(true);
+  HttpIntegrationTest::initialize();
+}
+
+void XfccIntegrationTest::testRequestAndResponseWithXfccHeader(std::string previous_xfcc,
                                                                std::string expected_xfcc) {
+  Network::ClientConnectionPtr conn = tls_ ? makeMtlsClientConnection() : makeClientConnection();
   Http::TestHeaderMapImpl header_map;
   if (previous_xfcc.empty()) {
     header_map = Http::TestHeaderMapImpl{{":method", "GET"},
@@ -159,84 +159,104 @@ INSTANTIATE_TEST_CASE_P(IpVersions, XfccIntegrationTest,
                         testing::ValuesIn(TestEnvironment::getIpVersionsForTest()));
 
 TEST_P(XfccIntegrationTest, MtlsForwardOnly) {
-  startTestServerWithXfccConfig("forward_only", "");
-  testRequestAndResponseWithXfccHeader(makeMtlsClientConnection(), previous_xfcc_, previous_xfcc_);
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::FORWARD_ONLY;
+  initialize();
+  testRequestAndResponseWithXfccHeader(previous_xfcc_, previous_xfcc_);
 }
 
 TEST_P(XfccIntegrationTest, MtlsAlwaysForwardOnly) {
-  startTestServerWithXfccConfig("always_forward_only", "");
-  testRequestAndResponseWithXfccHeader(makeMtlsClientConnection(), previous_xfcc_, previous_xfcc_);
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::ALWAYS_FORWARD_ONLY;
+  initialize();
+  testRequestAndResponseWithXfccHeader(previous_xfcc_, previous_xfcc_);
 }
 
 TEST_P(XfccIntegrationTest, MtlsSanitize) {
-  startTestServerWithXfccConfig("sanitize", "");
-  testRequestAndResponseWithXfccHeader(makeMtlsClientConnection(), previous_xfcc_, "");
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::SANITIZE;
+  initialize();
+  testRequestAndResponseWithXfccHeader(previous_xfcc_, "");
 }
 
 TEST_P(XfccIntegrationTest, MtlsSanitizeSetSubjectSan) {
-  startTestServerWithXfccConfig("sanitize_set", "\"Subject\", \"SAN\"");
-  testRequestAndResponseWithXfccHeader(makeMtlsClientConnection(), previous_xfcc_,
-                                       current_xfcc_by_hash_ + ";" + client_subject_ + ";" +
-                                           client_san_);
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::SANITIZE_SET;
+  sccd_.mutable_subject()->set_value(true);
+  sccd_.mutable_san()->set_value(true);
+  initialize();
+  testRequestAndResponseWithXfccHeader(previous_xfcc_, current_xfcc_by_hash_ + ";" +
+                                                           client_subject_ + ";" + client_san_);
 }
 
 TEST_P(XfccIntegrationTest, MtlsAppendForward) {
-  startTestServerWithXfccConfig("append_forward", "");
-  testRequestAndResponseWithXfccHeader(makeMtlsClientConnection(), previous_xfcc_,
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::APPEND_FORWARD;
+  initialize();
+  testRequestAndResponseWithXfccHeader(previous_xfcc_,
                                        previous_xfcc_ + "," + current_xfcc_by_hash_);
 }
 
 TEST_P(XfccIntegrationTest, MtlsAppendForwardSubject) {
-  startTestServerWithXfccConfig("append_forward", "\"Subject\"");
-  testRequestAndResponseWithXfccHeader(makeMtlsClientConnection(), previous_xfcc_,
-                                       previous_xfcc_ + "," + current_xfcc_by_hash_ + ";" +
-                                           client_subject_);
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::APPEND_FORWARD;
+  sccd_.mutable_subject()->set_value(true);
+  initialize();
+  testRequestAndResponseWithXfccHeader(
+      previous_xfcc_, previous_xfcc_ + "," + current_xfcc_by_hash_ + ";" + client_subject_);
 }
 
 TEST_P(XfccIntegrationTest, MtlsAppendForwardSan) {
-  startTestServerWithXfccConfig("append_forward", "\"SAN\"");
-  testRequestAndResponseWithXfccHeader(makeMtlsClientConnection(), previous_xfcc_,
-                                       previous_xfcc_ + "," + current_xfcc_by_hash_ + ";" +
-                                           client_san_);
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::APPEND_FORWARD;
+  sccd_.mutable_san()->set_value(true);
+  initialize();
+  testRequestAndResponseWithXfccHeader(
+      previous_xfcc_, previous_xfcc_ + "," + current_xfcc_by_hash_ + ";" + client_san_);
 }
 
 TEST_P(XfccIntegrationTest, MtlsAppendForwardSubjectSan) {
-  startTestServerWithXfccConfig("append_forward", "\"Subject\", \"SAN\"");
-  testRequestAndResponseWithXfccHeader(makeMtlsClientConnection(), previous_xfcc_,
-                                       previous_xfcc_ + "," + current_xfcc_by_hash_ + ";" +
-                                           client_subject_ + ";" + client_san_);
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::APPEND_FORWARD;
+  sccd_.mutable_subject()->set_value(true);
+  sccd_.mutable_san()->set_value(true);
+  initialize();
+  testRequestAndResponseWithXfccHeader(previous_xfcc_, previous_xfcc_ + "," +
+                                                           current_xfcc_by_hash_ + ";" +
+                                                           client_subject_ + ";" + client_san_);
 }
 
 TEST_P(XfccIntegrationTest, MtlsAppendForwardSanPreviousXfccHeaderEmpty) {
-  startTestServerWithXfccConfig("append_forward", "\"SAN\"");
-  testRequestAndResponseWithXfccHeader(makeMtlsClientConnection(), "",
-                                       current_xfcc_by_hash_ + ";" + client_san_);
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::APPEND_FORWARD;
+  sccd_.mutable_san()->set_value(true);
+  initialize();
+  testRequestAndResponseWithXfccHeader("", current_xfcc_by_hash_ + ";" + client_san_);
 }
 
 TEST_P(XfccIntegrationTest, TlsAlwaysForwardOnly) {
   // The always_forward_only works regardless of whether the connection is TLS/mTLS.
-  startTestServerWithXfccConfig("always_forward_only", "");
-  testRequestAndResponseWithXfccHeader(makeClientConnection(), previous_xfcc_, previous_xfcc_);
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::ALWAYS_FORWARD_ONLY;
+  tls_ = false;
+  initialize();
+  testRequestAndResponseWithXfccHeader(previous_xfcc_, previous_xfcc_);
 }
 
 TEST_P(XfccIntegrationTest, TlsEnforceSanitize) {
   // The forward_only, append_forward and sanitize_set options are not effective when the connection
   // is not using Mtls.
-  startTestServerWithXfccConfig("forward_only", "");
-  testRequestAndResponseWithXfccHeader(makeClientConnection(), previous_xfcc_, "");
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::FORWARD_ONLY;
+  tls_ = false;
+  initialize();
+  testRequestAndResponseWithXfccHeader(previous_xfcc_, "");
 }
 
 TEST_P(XfccIntegrationTest, NonTlsAlwaysForwardOnly) {
   // The always_forward_only works regardless of whether the connection is TLS/mTLS.
-  startTestServerWithXfccConfig("always_forward_only", "");
-  testRequestAndResponseWithXfccHeader(makeClientConnection(), previous_xfcc_, previous_xfcc_);
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::ALWAYS_FORWARD_ONLY;
+  tls_ = false;
+  initialize();
+  testRequestAndResponseWithXfccHeader(previous_xfcc_, previous_xfcc_);
 }
 
 TEST_P(XfccIntegrationTest, NonTlsEnforceSanitize) {
   // The forward_only, append_forward and sanitize_set options are not effective when the connection
   // is not using Mtls.
-  startTestServerWithXfccConfig("forward_only", "");
-  testRequestAndResponseWithXfccHeader(makeClientConnection(), previous_xfcc_, "");
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::FORWARD_ONLY;
+  tls_ = false;
+  initialize();
+  testRequestAndResponseWithXfccHeader(previous_xfcc_, "");
 }
 
 TEST_P(XfccIntegrationTest, TagExtractedNameGenerationTest) {
@@ -248,7 +268,8 @@ TEST_P(XfccIntegrationTest, TagExtractedNameGenerationTest) {
   // the printout needs to be copied from each test parameterization and pasted into the respective
   // case in the switch statement below.
 
-  startTestServerWithXfccConfig("forward_only", "");
+  fcc_ = envoy::api::v2::filter::network::HttpConnectionManager::FORWARD_ONLY;
+  initialize();
 
   // Commented sample code to regenerate the map literals used below in the test log if necessary:
 
@@ -280,20 +301,20 @@ TEST_P(XfccIntegrationTest, TagExtractedNameGenerationTest) {
   case Network::Address::IpVersion::v4: {
     tag_extracted_counter_map = {
         {"listener.127.0.0.1_0.downstream_cx_total", "listener.downstream_cx_total"},
-        {"listener.127.0.0.1_0.http.router.downstream_rq_5xx", "listener.http.downstream_rq"},
-        {"listener.127.0.0.1_0.http.router.downstream_rq_4xx", "listener.http.downstream_rq"},
-        {"listener.127.0.0.1_0.http.router.downstream_rq_3xx", "listener.http.downstream_rq"},
+        {"listener.127.0.0.1_0.http.router.downstream_rq_5xx", "listener.http.downstream_rq_xx"},
+        {"listener.127.0.0.1_0.http.router.downstream_rq_4xx", "listener.http.downstream_rq_xx"},
+        {"listener.127.0.0.1_0.http.router.downstream_rq_3xx", "listener.http.downstream_rq_xx"},
         {"listener.127.0.0.1_0.downstream_cx_destroy", "listener.downstream_cx_destroy"},
         {"listener.127.0.0.1_0.downstream_cx_proxy_proto_error",
          "listener.downstream_cx_proxy_proto_error"},
-        {"listener.127.0.0.1_0.http.router.downstream_rq_2xx", "listener.http.downstream_rq"},
+        {"listener.127.0.0.1_0.http.router.downstream_rq_2xx", "listener.http.downstream_rq_xx"},
         {"http.router.rq_total", "http.rq_total"},
         {"http.router.tracing.not_traceable", "http.tracing.not_traceable"},
         {"http.router.tracing.random_sampling", "http.tracing.random_sampling"},
         {"http.router.rs_too_large", "http.rs_too_large"},
-        {"http.router.downstream_rq_5xx", "http.downstream_rq"},
-        {"http.router.downstream_rq_4xx", "http.downstream_rq"},
-        {"http.router.downstream_rq_2xx", "http.downstream_rq"},
+        {"http.router.downstream_rq_5xx", "http.downstream_rq_xx"},
+        {"http.router.downstream_rq_4xx", "http.downstream_rq_xx"},
+        {"http.router.downstream_rq_2xx", "http.downstream_rq_xx"},
         {"http.router.downstream_rq_ws_on_non_ws_route", "http.downstream_rq_ws_on_non_ws_route"},
         {"http.router.downstream_rq_tx_reset", "http.downstream_rq_tx_reset"},
         {"http.router.no_route", "http.no_route"},
@@ -301,7 +322,7 @@ TEST_P(XfccIntegrationTest, TagExtractedNameGenerationTest) {
         {"http.router.downstream_rq_too_large", "http.downstream_rq_too_large"},
         {"http.router.downstream_rq_response_before_rq_complete",
          "http.downstream_rq_response_before_rq_complete"},
-        {"http.router.downstream_rq_3xx", "http.downstream_rq"},
+        {"http.router.downstream_rq_3xx", "http.downstream_rq_xx"},
         {"http.router.downstream_cx_destroy", "http.downstream_cx_destroy"},
         {"http.router.downstream_rq_non_relative_path", "http.downstream_rq_non_relative_path"},
         {"http.router.downstream_cx_destroy_active_rq", "http.downstream_cx_destroy_active_rq"},
@@ -506,12 +527,12 @@ TEST_P(XfccIntegrationTest, TagExtractedNameGenerationTest) {
          "http.downstream_flow_control_resumed_reading_total"},
         {"stats.overflow", "stats.overflow"},
         {"http.admin.downstream_cx_total", "http.downstream_cx_total"},
-        {"http.admin.downstream_rq_3xx", "http.downstream_rq"},
+        {"http.admin.downstream_rq_3xx", "http.downstream_rq_xx"},
         {"http.admin.downstream_cx_idle_timeout", "http.downstream_cx_idle_timeout"},
         {"http.admin.downstream_rq_rx_reset", "http.downstream_rq_rx_reset"},
         {"http.admin.downstream_cx_ssl_total", "http.downstream_cx_ssl_total"},
         {"http.admin.downstream_cx_websocket_total", "http.downstream_cx_websocket_total"},
-        {"http.admin.downstream_rq_2xx", "http.downstream_rq"},
+        {"http.admin.downstream_rq_2xx", "http.downstream_rq_xx"},
         {"cluster_manager.cluster_modified", "cluster_manager.cluster_modified"},
         {"http.admin.downstream_cx_drain_close", "http.downstream_cx_drain_close"},
         {"http.admin.downstream_cx_destroy", "http.downstream_cx_destroy"},
@@ -523,11 +544,11 @@ TEST_P(XfccIntegrationTest, TagExtractedNameGenerationTest) {
         {"http.admin.downstream_rq_response_before_rq_complete",
          "http.downstream_rq_response_before_rq_complete"},
         {"http.admin.downstream_cx_tx_bytes_total", "http.downstream_cx_tx_bytes_total"},
-        {"http.admin.downstream_rq_4xx", "http.downstream_rq"},
+        {"http.admin.downstream_rq_4xx", "http.downstream_rq_xx"},
         {"http.admin.downstream_rq_non_relative_path", "http.downstream_rq_non_relative_path"},
         {"http.admin.downstream_rq_ws_on_non_ws_route", "http.downstream_rq_ws_on_non_ws_route"},
         {"http.admin.downstream_rq_too_large", "http.downstream_rq_too_large"},
-        {"http.admin.downstream_rq_5xx", "http.downstream_rq"},
+        {"http.admin.downstream_rq_5xx", "http.downstream_rq_xx"},
         {"http.async-client.no_route", "http.no_route"},
         {"http.admin.downstream_flow_control_paused_reading_total",
          "http.downstream_flow_control_paused_reading_total"},
@@ -603,18 +624,18 @@ TEST_P(XfccIntegrationTest, TagExtractedNameGenerationTest) {
         {"listener.[__1]_0.downstream_cx_destroy", "listener.downstream_cx_destroy"},
         {"listener.[__1]_0.downstream_cx_proxy_proto_error",
          "listener.downstream_cx_proxy_proto_error"},
-        {"listener.[__1]_0.http.router.downstream_rq_5xx", "listener.http.downstream_rq"},
-        {"listener.[__1]_0.http.router.downstream_rq_4xx", "listener.http.downstream_rq"},
+        {"listener.[__1]_0.http.router.downstream_rq_5xx", "listener.http.downstream_rq_xx"},
+        {"listener.[__1]_0.http.router.downstream_rq_4xx", "listener.http.downstream_rq_xx"},
         {"listener.[__1]_0.downstream_cx_total", "listener.downstream_cx_total"},
-        {"listener.[__1]_0.http.router.downstream_rq_3xx", "listener.http.downstream_rq"},
-        {"listener.[__1]_0.http.router.downstream_rq_2xx", "listener.http.downstream_rq"},
+        {"listener.[__1]_0.http.router.downstream_rq_3xx", "listener.http.downstream_rq_xx"},
+        {"listener.[__1]_0.http.router.downstream_rq_2xx", "listener.http.downstream_rq_xx"},
         {"http.router.rq_total", "http.rq_total"},
         {"http.router.tracing.not_traceable", "http.tracing.not_traceable"},
         {"http.router.tracing.random_sampling", "http.tracing.random_sampling"},
         {"http.router.rs_too_large", "http.rs_too_large"},
-        {"http.router.downstream_rq_5xx", "http.downstream_rq"},
-        {"http.router.downstream_rq_4xx", "http.downstream_rq"},
-        {"http.router.downstream_rq_2xx", "http.downstream_rq"},
+        {"http.router.downstream_rq_5xx", "http.downstream_rq_xx"},
+        {"http.router.downstream_rq_4xx", "http.downstream_rq_xx"},
+        {"http.router.downstream_rq_2xx", "http.downstream_rq_xx"},
         {"http.router.downstream_rq_ws_on_non_ws_route", "http.downstream_rq_ws_on_non_ws_route"},
         {"http.router.downstream_rq_tx_reset", "http.downstream_rq_tx_reset"},
         {"http.router.no_route", "http.no_route"},
@@ -622,7 +643,7 @@ TEST_P(XfccIntegrationTest, TagExtractedNameGenerationTest) {
         {"http.router.downstream_rq_too_large", "http.downstream_rq_too_large"},
         {"http.router.downstream_rq_response_before_rq_complete",
          "http.downstream_rq_response_before_rq_complete"},
-        {"http.router.downstream_rq_3xx", "http.downstream_rq"},
+        {"http.router.downstream_rq_3xx", "http.downstream_rq_xx"},
         {"http.router.downstream_cx_destroy", "http.downstream_cx_destroy"},
         {"http.router.downstream_rq_non_relative_path", "http.downstream_rq_non_relative_path"},
         {"http.router.downstream_cx_destroy_active_rq", "http.downstream_cx_destroy_active_rq"},
@@ -827,12 +848,12 @@ TEST_P(XfccIntegrationTest, TagExtractedNameGenerationTest) {
          "http.downstream_flow_control_resumed_reading_total"},
         {"stats.overflow", "stats.overflow"},
         {"http.admin.downstream_cx_total", "http.downstream_cx_total"},
-        {"http.admin.downstream_rq_3xx", "http.downstream_rq"},
+        {"http.admin.downstream_rq_3xx", "http.downstream_rq_xx"},
         {"http.admin.downstream_cx_idle_timeout", "http.downstream_cx_idle_timeout"},
         {"http.admin.downstream_rq_rx_reset", "http.downstream_rq_rx_reset"},
         {"http.admin.downstream_cx_ssl_total", "http.downstream_cx_ssl_total"},
         {"http.admin.downstream_cx_websocket_total", "http.downstream_cx_websocket_total"},
-        {"http.admin.downstream_rq_2xx", "http.downstream_rq"},
+        {"http.admin.downstream_rq_2xx", "http.downstream_rq_xx"},
         {"cluster_manager.cluster_modified", "cluster_manager.cluster_modified"},
         {"http.admin.downstream_cx_drain_close", "http.downstream_cx_drain_close"},
         {"http.admin.downstream_cx_destroy", "http.downstream_cx_destroy"},
@@ -844,11 +865,11 @@ TEST_P(XfccIntegrationTest, TagExtractedNameGenerationTest) {
         {"http.admin.downstream_rq_response_before_rq_complete",
          "http.downstream_rq_response_before_rq_complete"},
         {"http.admin.downstream_cx_tx_bytes_total", "http.downstream_cx_tx_bytes_total"},
-        {"http.admin.downstream_rq_4xx", "http.downstream_rq"},
+        {"http.admin.downstream_rq_4xx", "http.downstream_rq_xx"},
         {"http.admin.downstream_rq_non_relative_path", "http.downstream_rq_non_relative_path"},
         {"http.admin.downstream_rq_ws_on_non_ws_route", "http.downstream_rq_ws_on_non_ws_route"},
         {"http.admin.downstream_rq_too_large", "http.downstream_rq_too_large"},
-        {"http.admin.downstream_rq_5xx", "http.downstream_rq"},
+        {"http.admin.downstream_rq_5xx", "http.downstream_rq_xx"},
         {"http.async-client.no_route", "http.no_route"},
         {"http.admin.downstream_flow_control_paused_reading_total",
          "http.downstream_flow_control_paused_reading_total"},

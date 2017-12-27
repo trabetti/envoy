@@ -15,16 +15,14 @@
 #include "common/common/assert.h"
 #include "common/common/empty_string.h"
 #include "common/common/enum_to_int.h"
-#include "common/event/dispatcher_impl.h"
 #include "common/network/address_impl.h"
+#include "common/network/raw_buffer_socket.h"
 #include "common/network/utility.h"
 
 namespace Envoy {
 namespace Network {
 
 namespace {
-// TODO(mattklein123): Currently we don't populate local address for client connections. Nothing
-// looks at this currently, but we may want to populate this later for logging purposes.
 Address::InstanceConstSharedPtr getNullLocalAddress(const Address::Instance& address) {
   if (address.type() == Address::Type::Ip && address.ip()->version() == Address::IpVersion::v6) {
     return Utility::getIpv6AnyAddress();
@@ -54,17 +52,29 @@ void ConnectionImplUtility::updateBufferStats(uint64_t delta, uint64_t new_total
 
 std::atomic<uint64_t> ConnectionImpl::next_global_id_;
 
-ConnectionImpl::ConnectionImpl(Event::DispatcherImpl& dispatcher, int fd,
+ConnectionImpl::ConnectionImpl(Event::Dispatcher& dispatcher, int fd,
                                Address::InstanceConstSharedPtr remote_address,
                                Address::InstanceConstSharedPtr local_address,
                                Address::InstanceConstSharedPtr bind_to_address,
                                bool using_original_dst, bool connected)
-    : filter_manager_(*this, *this), remote_address_(remote_address), local_address_(local_address),
+    : ConnectionImpl(dispatcher, fd, remote_address, local_address, bind_to_address,
+                     TransportSocketPtr{new RawBufferSocket}, using_original_dst, connected) {}
+
+ConnectionImpl::ConnectionImpl(Event::Dispatcher& dispatcher, int fd,
+                               Address::InstanceConstSharedPtr remote_address,
+                               Address::InstanceConstSharedPtr local_address,
+                               Address::InstanceConstSharedPtr bind_to_address,
+                               TransportSocketPtr&& transport_socket, bool using_original_dst,
+                               bool connected)
+    : filter_manager_(*this, *this), remote_address_(remote_address),
+      local_address_((local_address == nullptr) ? getNullLocalAddress(*remote_address)
+                                                : local_address),
+
       write_buffer_(
           dispatcher.getWatermarkFactory().create([this]() -> void { this->onLowWatermark(); },
                                                   [this]() -> void { this->onHighWatermark(); })),
-      dispatcher_(dispatcher), fd_(fd), id_(++next_global_id_),
-      using_original_dst_(using_original_dst) {
+      transport_socket_(std::move(transport_socket)), dispatcher_(dispatcher), fd_(fd),
+      id_(++next_global_id_), using_original_dst_(using_original_dst) {
 
   // Treat the lack of a valid fd (which in practice only happens if we run out of FDs) as an OOM
   // condition and just crash.
@@ -93,6 +103,8 @@ ConnectionImpl::ConnectionImpl(Event::DispatcherImpl& dispatcher, int fd,
       file_event_->activate(Event::FileReadyType::Write);
     }
   }
+
+  transport_socket_->setTransportSocketCallbacks(*this);
 }
 
 ConnectionImpl::~ConnectionImpl() {
@@ -124,11 +136,12 @@ void ConnectionImpl::close(ConnectionCloseType type) {
 
   uint64_t data_to_write = write_buffer_->length();
   ENVOY_CONN_LOG(debug, "closing data_to_write={} type={}", *this, data_to_write, enumToInt(type));
-  if (data_to_write == 0 || type == ConnectionCloseType::NoFlush) {
+  if (data_to_write == 0 || type == ConnectionCloseType::NoFlush ||
+      !transport_socket_->canFlushClose()) {
     if (data_to_write > 0) {
       // We aren't going to wait to flush, but try to write as much as we can if there is pending
       // data.
-      doWriteToSocket();
+      transport_socket_->doWrite(*write_buffer_);
     }
 
     closeSocket(ConnectionEvent::LocalClose);
@@ -157,6 +170,7 @@ void ConnectionImpl::closeSocket(ConnectionEvent close_type) {
   }
 
   ENVOY_CONN_LOG(debug, "closing socket: {}", *this, static_cast<uint32_t>(close_type));
+  transport_socket_->closeSocket(close_type);
 
   // Drain input and output buffers.
   updateReadBufferStats(0, 0);
@@ -263,7 +277,7 @@ void ConnectionImpl::readDisable(bool disable) {
     // consume all available data.
     file_event_->setEnabled(Event::FileReadyType::Read | Event::FileReadyType::Write);
     // If the connection has data buffered there's no guarantee there's also data in the kernel
-    // which will kick off the filter chain.  Instead fake an event to make sure the buffered data
+    // which will kick off the filter chain. Instead fake an event to make sure the buffered data
     // gets processed regardless.
     if (read_buffer_.length() > 0) {
       file_event_->activate(Event::FileReadyType::Read);
@@ -282,6 +296,10 @@ void ConnectionImpl::raiseEvent(ConnectionEvent event) {
 bool ConnectionImpl::readEnabled() const { return state_ & InternalState::ReadEnabled; }
 
 void ConnectionImpl::addConnectionCallbacks(ConnectionCallbacks& cb) { callbacks_.push_back(&cb); }
+
+void ConnectionImpl::addBytesSentCallback(BytesSentCb cb) {
+  bytes_sent_callbacks_.emplace_back(cb);
+}
 
 void ConnectionImpl::write(Buffer::Instance& data) {
   // NOTE: This is kind of a hack, but currently we don't support restart/continue on the write
@@ -320,18 +338,18 @@ void ConnectionImpl::setBufferLimits(uint32_t limit) {
   // Due to the fact that writes to the connection and flushing data from the connection are done
   // asynchronously, we have the option of either setting the watermarks aggressively, and regularly
   // enabling/disabling reads from the socket, or allowing more data, but then not triggering
-  // based on watermarks until 2x the data is buffered in the common case.  Given these are all soft
+  // based on watermarks until 2x the data is buffered in the common case. Given these are all soft
   // limits we err on the side of buffering more triggering watermark callbacks less often.
   //
   // Given the current implementation for straight up TCP proxying, the common case is reading
   // |limit| bytes through the socket, passing |limit| bytes to the connection (triggering the high
   // watermarks) and the immediately draining |limit| bytes to the socket (triggering the low
-  // watermarks).  We avoid this by setting the high watermark to limit + 1 so a single read will
+  // watermarks). We avoid this by setting the high watermark to limit + 1 so a single read will
   // not trigger watermarks if the socket is not blocked.
   //
   // If the connection class is changed to write to the buffer and flush to the socket in the same
   // stack then instead of checking watermarks after the write and again after the flush it can
-  // check once after both operations complete.  At that point it would be better to change the high
+  // check once after both operations complete. At that point it would be better to change the high
   // watermark from |limit + 1| to |limit| as the common case (move |limit| bytes, flush |limit|
   // bytes) would not trigger watermarks but a blocked socket (move |limit| bytes, flush 0 bytes)
   // would result in respecting the exact buffer limit.
@@ -398,48 +416,12 @@ void ConnectionImpl::onFileEvent(uint32_t events) {
   }
 }
 
-ConnectionImpl::IoResult ConnectionImpl::doReadFromSocket() {
-  PostIoAction action = PostIoAction::KeepOpen;
-  uint64_t bytes_read = 0;
-  do {
-    // 16K read is arbitrary. IIRC, libevent will currently clamp this to 4K. libevent will also
-    // use an ioctl() before every read to figure out how much data there is to read.
-    //
-    // TODO(mattklein123) PERF: Tune the read size and figure out a way of getting rid of the
-    // ioctl(). The extra syscall is not worth it.
-    int rc = read_buffer_.read(fd_, 16384);
-    ENVOY_CONN_LOG(trace, "read returns: {}", *this, rc);
-
-    // Remote close. Might need to raise data before raising close.
-    if (rc == 0) {
-      action = PostIoAction::Close;
-      break;
-    } else if (rc == -1) {
-      // Remote error (might be no data).
-      ENVOY_CONN_LOG(trace, "read error: {}", *this, errno);
-      if (errno != EAGAIN) {
-        action = PostIoAction::Close;
-      }
-
-      break;
-    } else {
-      bytes_read += rc;
-      if (shouldDrainReadBuffer()) {
-        setReadBufferReady();
-        break;
-      }
-    }
-  } while (true);
-
-  return {action, bytes_read};
-}
-
 void ConnectionImpl::onReadReady() {
   ENVOY_CONN_LOG(trace, "read ready", *this);
 
   ASSERT(!(state_ & InternalState::Connecting));
 
-  IoResult result = doReadFromSocket();
+  IoResult result = transport_socket_->doRead(read_buffer_);
   uint64_t new_buffer_size = read_buffer_.length();
   updateReadBufferStats(result.bytes_processed_, new_buffer_size);
   onRead(new_buffer_size);
@@ -450,35 +432,6 @@ void ConnectionImpl::onReadReady() {
     closeSocket(ConnectionEvent::RemoteClose);
   }
 }
-
-ConnectionImpl::IoResult ConnectionImpl::doWriteToSocket() {
-  PostIoAction action;
-  uint64_t bytes_written = 0;
-  do {
-    if (write_buffer_->length() == 0) {
-      action = PostIoAction::KeepOpen;
-      break;
-    }
-    int rc = write_buffer_->write(fd_);
-    ENVOY_CONN_LOG(trace, "write returns: {}", *this, rc);
-    if (rc == -1) {
-      ENVOY_CONN_LOG(trace, "write error: {}", *this, errno);
-      if (errno == EAGAIN) {
-        action = PostIoAction::KeepOpen;
-      } else {
-        action = PostIoAction::Close;
-      }
-
-      break;
-    } else {
-      bytes_written += rc;
-    }
-  } while (true);
-
-  return {action, bytes_written};
-}
-
-void ConnectionImpl::onConnected() { raiseEvent(ConnectionEvent::Connected); }
 
 void ConnectionImpl::onWriteReady() {
   ENVOY_CONN_LOG(trace, "write ready", *this);
@@ -493,7 +446,7 @@ void ConnectionImpl::onWriteReady() {
     if (error == 0) {
       ENVOY_CONN_LOG(debug, "connected", *this);
       state_ &= ~InternalState::Connecting;
-      onConnected();
+      transport_socket_->onConnected();
       // It's possible that we closed during the connect callback.
       if (state() != State::Open) {
         ENVOY_CONN_LOG(debug, "close during connected callback", *this);
@@ -506,7 +459,7 @@ void ConnectionImpl::onWriteReady() {
     }
   }
 
-  IoResult result = doWriteToSocket();
+  IoResult result = transport_socket_->doWrite(*write_buffer_);
   uint64_t new_buffer_size = write_buffer_->length();
   updateWriteBufferStats(result.bytes_processed_, new_buffer_size);
 
@@ -518,6 +471,15 @@ void ConnectionImpl::onWriteReady() {
   } else if ((state_ & InternalState::CloseWithFlush) && new_buffer_size == 0) {
     ENVOY_CONN_LOG(debug, "write flush complete", *this);
     closeSocket(ConnectionEvent::LocalClose);
+  } else if (result.action_ == PostIoAction::KeepOpen && result.bytes_processed_ > 0) {
+    for (BytesSentCb& cb : bytes_sent_callbacks_) {
+      cb(result.bytes_processed_);
+
+      // If a callback closes the socket, stop iterating.
+      if (fd_ == -1) {
+        return;
+      }
+    }
   }
 }
 
@@ -538,6 +500,12 @@ void ConnectionImpl::doConnect() {
       state_ &= ~InternalState::Connecting;
       ENVOY_CONN_LOG(debug, "immediate connection error: {}", *this, errno);
     }
+  }
+
+  // The local address can only be retrieved for IP connections. Other
+  // types, such as UDS, don't have a notion of a local address.
+  if (remote_address_->type() == Address::Type::Ip) {
+    local_address_ = Address::addressFromFd(fd_);
   }
 }
 
@@ -566,11 +534,11 @@ void ConnectionImpl::updateWriteBufferStats(uint64_t num_written, uint64_t new_s
                                            connection_stats_->write_current_);
 }
 
-ClientConnectionImpl::ClientConnectionImpl(
-    Event::DispatcherImpl& dispatcher, Address::InstanceConstSharedPtr address,
-    const Network::Address::InstanceConstSharedPtr source_address)
-    : ConnectionImpl(dispatcher, address->socket(Address::SocketType::Stream), address,
-                     getNullLocalAddress(*address), source_address, false, false) {}
+ClientConnectionImpl::ClientConnectionImpl(Event::Dispatcher& dispatcher,
+                                           const Address::InstanceConstSharedPtr& remote_address,
+                                           const Address::InstanceConstSharedPtr& source_address)
+    : ConnectionImpl(dispatcher, remote_address->socket(Address::SocketType::Stream),
+                     remote_address, nullptr, source_address, false, false) {}
 
 } // namespace Network
 } // namespace Envoy

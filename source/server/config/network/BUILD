@@ -15,6 +15,7 @@ envoy_cc_library(
     deps = [
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
+        "//source/common/config:filter_json_lib",
         "//source/common/config:well_known_names",
         "//source/common/filter/auth:client_ssl_lib",
     ],
@@ -44,13 +45,13 @@ envoy_cc_library(
         "//include/envoy/server:filter_config_interface",
         "//include/envoy/server:options_interface",
         "//include/envoy/stats:stats_interface",
+        "//source/common/access_log:access_log_lib",
         "//source/common/common:logger_lib",
         "//source/common/config:filter_json_lib",
         "//source/common/config:utility_lib",
         "//source/common/config:well_known_names",
         "//source/common/http:conn_manager_lib",
         "//source/common/http:utility_lib",
-        "//source/common/http/access_log:access_log_lib",
         "//source/common/http/http1:codec_lib",
         "//source/common/http/http2:codec_lib",
         "//source/common/json:json_loader_lib",
@@ -66,9 +67,8 @@ envoy_cc_library(
     deps = [
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
+        "//source/common/config:filter_json_lib",
         "//source/common/config:well_known_names",
-        "//source/common/json:config_schemas_lib",
-        "//source/common/json:json_loader_lib",
         "//source/common/mongo:proxy_lib",
     ],
 )
@@ -80,8 +80,10 @@ envoy_cc_library(
     deps = [
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
+        "//source/common/config:filter_json_lib",
         "//source/common/config:well_known_names",
         "//source/common/filter:ratelimit_lib",
+        "//source/common/protobuf:utility_lib",
     ],
 )
 
@@ -92,6 +94,7 @@ envoy_cc_library(
     deps = [
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
+        "//source/common/config:filter_json_lib",
         "//source/common/config:well_known_names",
         "//source/common/redis:codec_lib",
         "//source/common/redis:command_splitter_lib",
@@ -104,9 +107,13 @@ envoy_cc_library(
     name = "tcp_proxy_lib",
     srcs = ["tcp_proxy.cc"],
     hdrs = ["tcp_proxy.h"],
+    external_deps = [
+        "envoy_filter_network_tcp_proxy",
+    ],
     deps = [
         "//include/envoy/registry",
         "//include/envoy/server:filter_config_interface",
+        "//source/common/config:filter_json_lib",
         "//source/common/config:well_known_names",
         "//source/common/filter:tcp_proxy_lib",
     ],

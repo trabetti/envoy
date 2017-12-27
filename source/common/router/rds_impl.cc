@@ -9,23 +9,25 @@
 #include "common/config/rds_json.h"
 #include "common/config/subscription_factory.h"
 #include "common/config/utility.h"
+#include "common/protobuf/utility.h"
 #include "common/router/config_impl.h"
 #include "common/router/rds_subscription.h"
 
+#include "api/rds.pb.validate.h"
 #include "fmt/format.h"
 
 namespace Envoy {
 namespace Router {
 
 RouteConfigProviderSharedPtr RouteConfigProviderUtil::create(
-    const envoy::api::v2::filter::http::HttpConnectionManager& config, Runtime::Loader& runtime,
+    const envoy::api::v2::filter::network::HttpConnectionManager& config, Runtime::Loader& runtime,
     Upstream::ClusterManager& cm, Stats::Scope& scope, const std::string& stat_prefix,
     Init::Manager& init_manager, RouteConfigProviderManager& route_config_provider_manager) {
   switch (config.route_specifier_case()) {
-  case envoy::api::v2::filter::http::HttpConnectionManager::kRouteConfig:
+  case envoy::api::v2::filter::network::HttpConnectionManager::kRouteConfig:
     return RouteConfigProviderSharedPtr{
         new StaticRouteConfigProviderImpl(config.route_config(), runtime, cm)};
-  case envoy::api::v2::filter::http::HttpConnectionManager::kRds:
+  case envoy::api::v2::filter::network::HttpConnectionManager::kRds:
     return route_config_provider_manager.getRouteConfigProvider(config.rds(), cm, scope,
                                                                 stat_prefix, init_manager);
   default:
@@ -41,7 +43,7 @@ StaticRouteConfigProviderImpl::StaticRouteConfigProviderImpl(
 // TODO(htuch): If support for multiple clusters is added per #1170 cluster_name_
 // initialization needs to be fixed.
 RdsRouteConfigProviderImpl::RdsRouteConfigProviderImpl(
-    const envoy::api::v2::filter::http::Rds& rds, const std::string& manager_identifier,
+    const envoy::api::v2::filter::network::Rds& rds, const std::string& manager_identifier,
     Runtime::Loader& runtime, Upstream::ClusterManager& cm, Event::Dispatcher& dispatcher,
     Runtime::RandomGenerator& random, const LocalInfo::LocalInfo& local_info, Stats::Scope& scope,
     const std::string& stat_prefix, ThreadLocal::SlotAllocator& tls,
@@ -104,6 +106,7 @@ void RdsRouteConfigProviderImpl::onConfigUpdate(const ResourceVector& resources)
     throw EnvoyException(fmt::format("Unexpected RDS resource length: {}", resources.size()));
   }
   const auto& route_config = resources[0];
+  MessageUtil::validate(route_config);
   // TODO(PiotrSikora): Remove this hack once fixed internally.
   if (!(route_config.name() == route_config_name_)) {
     throw EnvoyException(fmt::format("Unexpected RDS configuration (expecting {}): {}",
@@ -170,8 +173,8 @@ RouteConfigProviderManagerImpl::rdsRouteConfigProviders() {
 };
 
 Router::RouteConfigProviderSharedPtr RouteConfigProviderManagerImpl::getRouteConfigProvider(
-    const envoy::api::v2::filter::http::Rds& rds, Upstream::ClusterManager& cm, Stats::Scope& scope,
-    const std::string& stat_prefix, Init::Manager& init_manager) {
+    const envoy::api::v2::filter::network::Rds& rds, Upstream::ClusterManager& cm,
+    Stats::Scope& scope, const std::string& stat_prefix, Init::Manager& init_manager) {
 
   // RdsRouteConfigProviders are unique based on their serialized RDS config.
   // TODO(htuch): Full serialization here gives large IDs, could get away with a
@@ -202,38 +205,25 @@ Router::RouteConfigProviderSharedPtr RouteConfigProviderManagerImpl::getRouteCon
   return new_provider;
 };
 
-void RouteConfigProviderManagerImpl::addRouteInfo(const RdsRouteConfigProvider& provider,
-                                                  Buffer::Instance& response) {
-  // TODO(junr03): change this to proto with JSON transcoding when #1522 is done.
-  response.add("{\n");
-  response.add(fmt::format("    \"version_info\": \"{}\",\n", provider.versionInfo()));
-  response.add(fmt::format("    \"route_config_name\": \"{}\",\n", provider.routeConfigName()));
-  response.add(fmt::format("    \"cluster_name\": \"{}\",\n", provider.clusterName()));
-  response.add("    \"route_table_dump\": ");
-  response.add(fmt::format("{}\n", provider.configAsJson()));
-  response.add("}\n");
-}
-
 Http::Code RouteConfigProviderManagerImpl::handlerRoutes(const std::string& url,
                                                          Buffer::Instance& response) {
   Http::Utility::QueryParams query_params = Http::Utility::parseQueryString(url);
   // If there are no query params, print out all the configured route tables.
   if (query_params.size() == 0) {
-    for (const auto& provider : rdsRouteConfigProviders()) {
-      addRouteInfo(*provider, response);
-    }
-    return Http::Code::OK;
+    return handlerRoutesLoop(response, rdsRouteConfigProviders());
   }
 
   // If there are query params, make sure it is only the route_config_name param.
   const auto it = query_params.find("route_config_name");
   if (query_params.size() == 1 && it != query_params.end()) {
+    // Create a vector with all the providers that have the queried route_config_name.
+    std::vector<RdsRouteConfigProviderSharedPtr> selected_providers;
     for (const auto& provider : rdsRouteConfigProviders()) {
       if (provider->routeConfigName() == it->second) {
-        addRouteInfo(*provider, response);
+        selected_providers.push_back(provider);
       }
     }
-    return Http::Code::OK;
+    return handlerRoutesLoop(response, selected_providers);
   }
   response.add("{\n");
   response.add("    \"general_usage\": \"/routes (dump all dynamic HTTP route tables).\",\n");
@@ -244,5 +234,26 @@ Http::Code RouteConfigProviderManagerImpl::handlerRoutes(const std::string& url,
   return Http::Code::NotFound;
 }
 
+Http::Code RouteConfigProviderManagerImpl::handlerRoutesLoop(
+    Buffer::Instance& response, const std::vector<RdsRouteConfigProviderSharedPtr> providers) {
+  bool first_item = true;
+  response.add("[\n");
+  for (const auto& provider : providers) {
+    if (!first_item) {
+      response.add(",");
+    } else {
+      first_item = false;
+    }
+    response.add("{\n");
+    response.add(fmt::format("\"version_info\": \"{}\",\n", provider->versionInfo()));
+    response.add(fmt::format("\"route_config_name\": \"{}\",\n", provider->routeConfigName()));
+    response.add(fmt::format("\"cluster_name\": \"{}\",\n", provider->clusterName()));
+    response.add("\"route_table_dump\": ");
+    response.add(fmt::format("{}\n", provider->configAsJson()));
+    response.add("}\n");
+  }
+  response.add("]\n");
+  return Http::Code::OK;
+}
 } // namespace Router
 } // namespace Envoy

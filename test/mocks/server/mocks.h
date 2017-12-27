@@ -46,6 +46,7 @@ public:
   MOCK_METHOD0(baseId, uint64_t());
   MOCK_METHOD0(concurrency, uint32_t());
   MOCK_METHOD0(configPath, const std::string&());
+  MOCK_METHOD0(v2ConfigOnly, bool());
   MOCK_METHOD0(adminAddressPath, const std::string&());
   MOCK_METHOD0(localAddressIpVersion, Network::Address::IpVersion());
   MOCK_METHOD0(drainTime, std::chrono::seconds());
@@ -62,6 +63,7 @@ public:
   MOCK_METHOD0(maxObjNameLength, uint64_t());
 
   std::string config_path_;
+  bool v2_config_only_{};
   std::string admin_address_path_;
   std::string service_cluster_name_;
   std::string service_node_name_;
@@ -139,7 +141,9 @@ public:
   MockListenerComponentFactory();
   ~MockListenerComponentFactory();
 
-  DrainManagerPtr createDrainManager() override { return DrainManagerPtr{createDrainManager_()}; }
+  DrainManagerPtr createDrainManager(envoy::api::v2::Listener::DrainType drain_type) override {
+    return DrainManagerPtr{createDrainManager_(drain_type)};
+  }
 
   MOCK_METHOD2(createFilterFactoryList,
                std::vector<Configuration::NetworkFilterFactoryCb>(
@@ -148,7 +152,7 @@ public:
   MOCK_METHOD2(createListenSocket,
                Network::ListenSocketSharedPtr(Network::Address::InstanceConstSharedPtr address,
                                               bool bind_to_port));
-  MOCK_METHOD0(createDrainManager_, DrainManager*());
+  MOCK_METHOD1(createDrainManager_, DrainManager*(envoy::api::v2::Listener::DrainType drain_type));
   MOCK_METHOD0(nextListenerTag, uint64_t());
 
   std::shared_ptr<Network::MockListenSocket> socket_;
@@ -175,7 +179,7 @@ public:
 
   MOCK_METHOD0(filterChainFactory, Network::FilterChainFactory&());
   MOCK_METHOD0(socket, Network::ListenSocket&());
-  MOCK_METHOD0(sslContext, Ssl::ServerContext*());
+  MOCK_METHOD0(defaultSslContext, Ssl::ServerContext*());
   MOCK_METHOD0(useProxyProto, bool());
   MOCK_METHOD0(bindToPort, bool());
   MOCK_METHOD0(useOriginalDst, bool());

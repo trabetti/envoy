@@ -57,18 +57,6 @@ envoy_cc_test(
     ],
 )
 
-envoy_cc_test(
-    name = "proto_integration_test",
-    srcs = ["proto_integration_test.cc"],
-    deps = [
-        ":http_integration_lib",
-        "//source/common/http:header_map_lib",
-        "//source/common/protobuf:utility_lib",
-        "//test/test_common:network_utility_lib",
-        "//test/test_common:utility_lib",
-    ],
-)
-
 envoy_sh_test(
     name = "hotrestart_test",
     srcs = envoy_select_hot_restart(["hotrestart_test.sh"]),
@@ -106,6 +94,18 @@ envoy_cc_test(
 )
 
 envoy_cc_test(
+    name = "header_integration_test",
+    srcs = [
+        "header_integration_test.cc",
+    ],
+    external_deps = ["envoy_filter_network_http_connection_manager"],
+    deps = [
+        ":http_integration_lib",
+        "//source/common/protobuf",
+    ],
+)
+
+envoy_cc_test(
     name = "http2_integration_test",
     srcs = [
         "http2_integration_test.cc",
@@ -122,6 +122,16 @@ envoy_cc_test(
         "//test/mocks/http:http_mocks",
         "//test/mocks/upstream:upstream_mocks",
         "//test/test_common:utility_lib",
+    ],
+)
+
+envoy_cc_test(
+    name = "lua_integration_test",
+    srcs = [
+        "lua_integration_test.cc",
+    ],
+    deps = [
+        ":http_integration_lib",
     ],
 )
 
@@ -224,6 +234,7 @@ envoy_cc_test_library(
         "//source/common/common:assert_lib",
         "//source/common/common:logger_lib",
         "//source/common/common:thread_lib",
+        "//source/common/event:dispatcher_lib",
         "//source/common/grpc:codec_lib",
         "//source/common/grpc:common_lib",
         "//source/common/http:codec_client_lib",
@@ -243,15 +254,16 @@ envoy_cc_test_library(
         "//source/server:hot_restart_nop_lib",
         "//source/server:server_lib",
         "//source/server:test_hooks_lib",
+        "//source/server/config/access_log:file_access_log_lib",
         "//source/server/config/http:buffer_lib",
         "//source/server/config/http:cors_lib",
         "//source/server/config/http:dynamo_lib",
         "//source/server/config/http:fault_lib",
-        "//source/server/config/http:file_access_log_lib",
         "//source/server/config/http:grpc_http1_bridge_lib",
         "//source/server/config/http:grpc_json_transcoder_lib",
         "//source/server/config/http:ip_tagging_lib",
         "//source/server/config/http:lightstep_lib",
+        "//source/server/config/http:lua_lib",
         "//source/server/config/http:ratelimit_lib",
         "//source/server/config/http:router_lib",
         "//source/server/config/http:zipkin_lib",

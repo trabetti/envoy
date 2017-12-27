@@ -6,17 +6,22 @@
 #include "test/mocks/runtime/mocks.h"
 #include "test/mocks/ssl/mocks.h"
 #include "test/mocks/upstream/mocks.h"
+#include "test/test_common/utility.h"
 
 #include "api/eds.pb.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+
+using testing::ReturnRef;
 
 namespace Envoy {
 namespace Upstream {
 
 class EdsTest : public testing::Test {
 protected:
-  EdsTest() {
+  EdsTest() { resetCluster(); }
+
+  void resetCluster() {
     resetCluster(R"EOF(
     {
       "name": "name",
@@ -50,13 +55,20 @@ protected:
   NiceMock<LocalInfo::MockLocalInfo> local_info_;
 };
 
+// Negative test for protoc-gen-validate constraints.
+TEST_F(EdsTest, ValidateFail) {
+  Protobuf::RepeatedPtrField<envoy::api::v2::ClusterLoadAssignment> resources;
+  resources.Add();
+  EXPECT_THROW(cluster_->onConfigUpdate(resources), ProtoValidationException);
+}
+
 // Validate that onConfigUpdate() with unexpected cluster names rejects config.
 TEST_F(EdsTest, OnConfigUpdateWrongName) {
   Protobuf::RepeatedPtrField<envoy::api::v2::ClusterLoadAssignment> resources;
   auto* cluster_load_assignment = resources.Add();
   cluster_load_assignment->set_cluster_name("wrong name");
   bool initialized = false;
-  cluster_->setInitializedCb([&initialized] { initialized = true; });
+  cluster_->initialize([&initialized] { initialized = true; });
   EXPECT_THROW(cluster_->onConfigUpdate(resources), EnvoyException);
   cluster_->onConfigUpdateFailed(nullptr);
   EXPECT_TRUE(initialized);
@@ -65,7 +77,7 @@ TEST_F(EdsTest, OnConfigUpdateWrongName) {
 // Validate that onConfigUpdate() with empty cluster vector size ignores config.
 TEST_F(EdsTest, OnConfigUpdateEmpty) {
   bool initialized = false;
-  cluster_->setInitializedCb([&initialized] { initialized = true; });
+  cluster_->initialize([&initialized] { initialized = true; });
   cluster_->onConfigUpdate({});
   EXPECT_EQ(1UL, stats_.counter("cluster.name.update_empty").value());
   EXPECT_TRUE(initialized);
@@ -75,7 +87,7 @@ TEST_F(EdsTest, OnConfigUpdateEmpty) {
 TEST_F(EdsTest, OnConfigUpdateWrongSize) {
   Protobuf::RepeatedPtrField<envoy::api::v2::ClusterLoadAssignment> resources;
   bool initialized = false;
-  cluster_->setInitializedCb([&initialized] { initialized = true; });
+  cluster_->initialize([&initialized] { initialized = true; });
   auto* cluster_load_assignment = resources.Add();
   cluster_load_assignment->set_cluster_name("fare");
   cluster_load_assignment = resources.Add();
@@ -91,8 +103,8 @@ TEST_F(EdsTest, OnConfigUpdateSuccess) {
   auto* cluster_load_assignment = resources.Add();
   cluster_load_assignment->set_cluster_name("fare");
   bool initialized = false;
-  cluster_->setInitializedCb([&initialized] { initialized = true; });
-  EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+  cluster_->initialize([&initialized] { initialized = true; });
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
   EXPECT_TRUE(initialized);
 }
 
@@ -110,8 +122,8 @@ TEST_F(EdsTest, NoServiceNameOnSuccessConfigUpdate) {
   auto* cluster_load_assignment = resources.Add();
   cluster_load_assignment->set_cluster_name("name");
   bool initialized = false;
-  cluster_->setInitializedCb([&initialized] { initialized = true; });
-  EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+  cluster_->initialize([&initialized] { initialized = true; });
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
   EXPECT_TRUE(initialized);
 }
 
@@ -124,6 +136,7 @@ TEST_F(EdsTest, EndpointMetadata) {
 
   auto* endpoint = endpoints->add_lb_endpoints();
   endpoint->mutable_endpoint()->mutable_address()->mutable_socket_address()->set_address("1.2.3.4");
+  endpoint->mutable_endpoint()->mutable_address()->mutable_socket_address()->set_port_value(80);
   Config::Metadata::mutableMetadataValue(*endpoint->mutable_metadata(),
                                          Config::MetadataFilters::get().ENVOY_LB, "string_key")
       .set_string_value("string_value");
@@ -133,17 +146,18 @@ TEST_F(EdsTest, EndpointMetadata) {
 
   auto* canary = endpoints->add_lb_endpoints();
   canary->mutable_endpoint()->mutable_address()->mutable_socket_address()->set_address("2.3.4.5");
+  canary->mutable_endpoint()->mutable_address()->mutable_socket_address()->set_port_value(80);
   Config::Metadata::mutableMetadataValue(*canary->mutable_metadata(),
                                          Config::MetadataFilters::get().ENVOY_LB,
                                          Config::MetadataEnvoyLbKeys::get().CANARY)
       .set_bool_value(true);
 
   bool initialized = false;
-  cluster_->setInitializedCb([&initialized] { initialized = true; });
-  EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+  cluster_->initialize([&initialized] { initialized = true; });
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
   EXPECT_TRUE(initialized);
 
-  auto& hosts = cluster_->hosts();
+  auto& hosts = cluster_->prioritySet().hostSetsPerPriority()[0]->hosts();
   EXPECT_EQ(hosts.size(), 2);
   EXPECT_EQ(hosts[0]->metadata().filter_metadata_size(), 2);
   EXPECT_EQ(Config::Metadata::metadataValue(hosts[0]->metadata(),
@@ -178,23 +192,29 @@ TEST_F(EdsTest, EndpointLocality) {
   locality->set_zone("hello");
   locality->set_sub_zone("world");
 
-  endpoints->add_lb_endpoints()
-      ->mutable_endpoint()
-      ->mutable_address()
-      ->mutable_socket_address()
-      ->set_address("1.2.3.4");
-  endpoints->add_lb_endpoints()
-      ->mutable_endpoint()
-      ->mutable_address()
-      ->mutable_socket_address()
-      ->set_address("2.3.4.5");
+  {
+    auto* endpoint_address = endpoints->add_lb_endpoints()
+                                 ->mutable_endpoint()
+                                 ->mutable_address()
+                                 ->mutable_socket_address();
+    endpoint_address->set_address("1.2.3.4");
+    endpoint_address->set_port_value(80);
+  }
+  {
+    auto* endpoint_address = endpoints->add_lb_endpoints()
+                                 ->mutable_endpoint()
+                                 ->mutable_address()
+                                 ->mutable_socket_address();
+    endpoint_address->set_address("2.3.4.5");
+    endpoint_address->set_port_value(80);
+  }
 
   bool initialized = false;
-  cluster_->setInitializedCb([&initialized] { initialized = true; });
-  EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+  cluster_->initialize([&initialized] { initialized = true; });
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
   EXPECT_TRUE(initialized);
 
-  const auto& hosts = cluster_->hosts();
+  auto& hosts = cluster_->prioritySet().hostSetsPerPriority()[0]->hosts();
   EXPECT_EQ(hosts.size(), 2);
   for (int i = 0; i < 2; ++i) {
     const auto& locality = hosts[i]->locality();
@@ -233,38 +253,227 @@ TEST_F(EdsTest, EndpointHostsPerLocality) {
   add_hosts_to_locality("", "us-east-1a", "", 1);
 
   bool initialized = false;
-  cluster_->setInitializedCb([&initialized] { initialized = true; });
-  EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+  cluster_->initialize([&initialized] { initialized = true; });
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
   EXPECT_TRUE(initialized);
 
-  EXPECT_EQ(2, cluster_->hostsPerLocality().size());
-  EXPECT_EQ(1, cluster_->hostsPerLocality()[0].size());
-  EXPECT_EQ(Locality("", "us-east-1a", ""),
-            Locality(cluster_->hostsPerLocality()[0][0]->locality()));
-  EXPECT_EQ(2, cluster_->hostsPerLocality()[1].size());
-  EXPECT_EQ(Locality("oceania", "koala", "ingsoc"),
-            Locality(cluster_->hostsPerLocality()[1][0]->locality()));
-  EXPECT_EQ(Locality("oceania", "koala", "ingsoc"),
-            Locality(cluster_->hostsPerLocality()[1][1]->locality()));
+  {
+    auto& hosts_per_locality = cluster_->prioritySet().hostSetsPerPriority()[0]->hostsPerLocality();
+    EXPECT_EQ(2, hosts_per_locality.size());
+    EXPECT_EQ(1, hosts_per_locality[0].size());
+    EXPECT_EQ(Locality("", "us-east-1a", ""), Locality(hosts_per_locality[0][0]->locality()));
+    EXPECT_EQ(2, hosts_per_locality[1].size());
+    EXPECT_EQ(Locality("oceania", "koala", "ingsoc"),
+              Locality(hosts_per_locality[1][0]->locality()));
+    EXPECT_EQ(Locality("oceania", "koala", "ingsoc"),
+              Locality(hosts_per_locality[1][1]->locality()));
+  }
 
   add_hosts_to_locality("oceania", "koala", "eucalyptus", 3);
   add_hosts_to_locality("general", "koala", "ingsoc", 5);
 
-  EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
 
-  EXPECT_EQ(4, cluster_->hostsPerLocality().size());
-  EXPECT_EQ(1, cluster_->hostsPerLocality()[0].size());
-  EXPECT_EQ(Locality("", "us-east-1a", ""),
-            Locality(cluster_->hostsPerLocality()[0][0]->locality()));
-  EXPECT_EQ(5, cluster_->hostsPerLocality()[1].size());
-  EXPECT_EQ(Locality("general", "koala", "ingsoc"),
-            Locality(cluster_->hostsPerLocality()[1][0]->locality()));
-  EXPECT_EQ(3, cluster_->hostsPerLocality()[2].size());
-  EXPECT_EQ(Locality("oceania", "koala", "eucalyptus"),
-            Locality(cluster_->hostsPerLocality()[2][0]->locality()));
-  EXPECT_EQ(2, cluster_->hostsPerLocality()[3].size());
-  EXPECT_EQ(Locality("oceania", "koala", "ingsoc"),
-            Locality(cluster_->hostsPerLocality()[3][0]->locality()));
+  {
+    auto& hosts_per_locality = cluster_->prioritySet().hostSetsPerPriority()[0]->hostsPerLocality();
+    EXPECT_EQ(4, hosts_per_locality.size());
+    EXPECT_EQ(1, hosts_per_locality[0].size());
+    EXPECT_EQ(Locality("", "us-east-1a", ""), Locality(hosts_per_locality[0][0]->locality()));
+    EXPECT_EQ(5, hosts_per_locality[1].size());
+    EXPECT_EQ(Locality("general", "koala", "ingsoc"),
+              Locality(hosts_per_locality[1][0]->locality()));
+    EXPECT_EQ(3, hosts_per_locality[2].size());
+    EXPECT_EQ(Locality("oceania", "koala", "eucalyptus"),
+              Locality(hosts_per_locality[2][0]->locality()));
+    EXPECT_EQ(2, hosts_per_locality[3].size());
+    EXPECT_EQ(Locality("oceania", "koala", "ingsoc"),
+              Locality(hosts_per_locality[3][0]->locality()));
+  }
+}
+
+// Validate that onConfigUpdate() updates bins hosts per priority as expected.
+TEST_F(EdsTest, EndpointHostsPerPriority) {
+  Protobuf::RepeatedPtrField<envoy::api::v2::ClusterLoadAssignment> resources;
+  auto* cluster_load_assignment = resources.Add();
+  cluster_load_assignment->set_cluster_name("fare");
+  uint32_t port = 1000;
+  auto add_hosts_to_priority = [cluster_load_assignment, &port](uint32_t priority, uint32_t n) {
+    auto* endpoints = cluster_load_assignment->add_endpoints();
+    endpoints->set_priority(priority);
+
+    for (uint32_t i = 0; i < n; ++i) {
+      auto* socket_address = endpoints->add_lb_endpoints()
+                                 ->mutable_endpoint()
+                                 ->mutable_address()
+                                 ->mutable_socket_address();
+      socket_address->set_address("1.2.3.4");
+      socket_address->set_port_value(port++);
+    }
+  };
+
+  // Set up the priority levels so 0 has two hosts and 1 has one host.
+  add_hosts_to_priority(0, 2);
+  add_hosts_to_priority(1, 1);
+
+  bool initialized = false;
+  cluster_->initialize([&initialized] { initialized = true; });
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+  EXPECT_TRUE(initialized);
+
+  ASSERT_EQ(2, cluster_->prioritySet().hostSetsPerPriority().size());
+  EXPECT_EQ(2, cluster_->prioritySet().hostSetsPerPriority()[0]->hosts().size());
+  EXPECT_EQ(1, cluster_->prioritySet().hostSetsPerPriority()[1]->hosts().size());
+
+  // Add 2 more hosts to priority 0, and add five hosts to priority 2.
+  // Note the (illegal) gap (no priority 1.)  Until we have config validation,
+  // make sure bad config does no harm.
+  add_hosts_to_priority(0, 2);
+  add_hosts_to_priority(3, 5);
+
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+
+  ASSERT_EQ(4, cluster_->prioritySet().hostSetsPerPriority().size());
+  EXPECT_EQ(4, cluster_->prioritySet().hostSetsPerPriority()[0]->hosts().size());
+  EXPECT_EQ(1, cluster_->prioritySet().hostSetsPerPriority()[1]->hosts().size());
+  EXPECT_EQ(0, cluster_->prioritySet().hostSetsPerPriority()[2]->hosts().size());
+  EXPECT_EQ(5, cluster_->prioritySet().hostSetsPerPriority()[3]->hosts().size());
+
+  // Update the number of hosts in priority #4. Make sure no other priority
+  // levels are affected.
+  cluster_load_assignment->clear_endpoints();
+  add_hosts_to_priority(3, 4);
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+  ASSERT_EQ(4, cluster_->prioritySet().hostSetsPerPriority().size());
+  EXPECT_EQ(4, cluster_->prioritySet().hostSetsPerPriority()[0]->hosts().size());
+  EXPECT_EQ(1, cluster_->prioritySet().hostSetsPerPriority()[1]->hosts().size());
+  EXPECT_EQ(0, cluster_->prioritySet().hostSetsPerPriority()[2]->hosts().size());
+  EXPECT_EQ(4, cluster_->prioritySet().hostSetsPerPriority()[3]->hosts().size());
+}
+
+// Make sure config updates with P!=0 are rejected for the local cluster.
+TEST_F(EdsTest, NoPriorityForLocalCluster) {
+  cm_.local_cluster_name_ = "fare";
+  Protobuf::RepeatedPtrField<envoy::api::v2::ClusterLoadAssignment> resources;
+  auto* cluster_load_assignment = resources.Add();
+  cluster_load_assignment->set_cluster_name("fare");
+  uint32_t port = 1000;
+  auto add_hosts_to_priority = [cluster_load_assignment, &port](uint32_t priority, uint32_t n) {
+    auto* endpoints = cluster_load_assignment->add_endpoints();
+    endpoints->set_priority(priority);
+
+    for (uint32_t i = 0; i < n; ++i) {
+      auto* socket_address = endpoints->add_lb_endpoints()
+                                 ->mutable_endpoint()
+                                 ->mutable_address()
+                                 ->mutable_socket_address();
+      socket_address->set_address("1.2.3.4");
+      socket_address->set_port_value(port++);
+    }
+  };
+
+  // Set up the priority levels so 0 has two hosts and 1 has one host. Update
+  // should fail.
+  add_hosts_to_priority(0, 2);
+  add_hosts_to_priority(1, 1);
+  bool initialized = false;
+  cluster_->initialize([&initialized] { initialized = true; });
+  EXPECT_THROW_WITH_MESSAGE(cluster_->onConfigUpdate(resources), EnvoyException,
+                            "Unexpected non-zero priority for local cluster 'fare'.");
+
+  // Try an update which only has endpoints with P=0. This should go through.
+  cluster_load_assignment->clear_endpoints();
+  add_hosts_to_priority(0, 2);
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+}
+
+// Set up an EDS config with multiple priorities and localities and make sure
+// they are loaded and reloaded as expected.
+TEST_F(EdsTest, PriorityAndLocality) {
+  Protobuf::RepeatedPtrField<envoy::api::v2::ClusterLoadAssignment> resources;
+  auto* cluster_load_assignment = resources.Add();
+  cluster_load_assignment->set_cluster_name("fare");
+  uint32_t port = 1000;
+  auto add_hosts_to_locality_and_priority =
+      [cluster_load_assignment, &port](const std::string& region, const std::string& zone,
+                                       const std::string& sub_zone, uint32_t priority, uint32_t n) {
+        auto* endpoints = cluster_load_assignment->add_endpoints();
+        endpoints->set_priority(priority);
+        auto* locality = endpoints->mutable_locality();
+        locality->set_region(region);
+        locality->set_zone(zone);
+        locality->set_sub_zone(sub_zone);
+
+        for (uint32_t i = 0; i < n; ++i) {
+          auto* socket_address = endpoints->add_lb_endpoints()
+                                     ->mutable_endpoint()
+                                     ->mutable_address()
+                                     ->mutable_socket_address();
+          socket_address->set_address("1.2.3.4");
+          socket_address->set_port_value(port++);
+        }
+      };
+
+  // Set up both priority 0 and priority 1 with 2 localities.
+  add_hosts_to_locality_and_priority("oceania", "koala", "ingsoc", 0, 2);
+  add_hosts_to_locality_and_priority("", "us-east-1a", "", 0, 1);
+  add_hosts_to_locality_and_priority("", "us-east-1a", "", 1, 8);
+  add_hosts_to_locality_and_priority("foo", "bar", "eep", 1, 2);
+
+  bool initialized = false;
+  cluster_->initialize([&initialized] { initialized = true; });
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+  EXPECT_TRUE(initialized);
+
+  {
+    auto& first_hosts_per_locality =
+        cluster_->prioritySet().hostSetsPerPriority()[0]->hostsPerLocality();
+    EXPECT_EQ(2, first_hosts_per_locality.size());
+    EXPECT_EQ(1, first_hosts_per_locality[0].size());
+    EXPECT_EQ(Locality("", "us-east-1a", ""), Locality(first_hosts_per_locality[0][0]->locality()));
+    EXPECT_EQ(2, first_hosts_per_locality[1].size());
+    EXPECT_EQ(Locality("oceania", "koala", "ingsoc"),
+              Locality(first_hosts_per_locality[1][0]->locality()));
+    EXPECT_EQ(Locality("oceania", "koala", "ingsoc"),
+              Locality(first_hosts_per_locality[1][1]->locality()));
+
+    auto& second_hosts_per_locality =
+        cluster_->prioritySet().hostSetsPerPriority()[1]->hostsPerLocality();
+    ASSERT_EQ(2, second_hosts_per_locality.size());
+    EXPECT_EQ(8, second_hosts_per_locality[0].size());
+    EXPECT_EQ(2, second_hosts_per_locality[1].size());
+  }
+
+  // Add one more locality to both priority 0 and priority 1.
+  add_hosts_to_locality_and_priority("oceania", "koala", "eucalyptus", 0, 3);
+  add_hosts_to_locality_and_priority("general", "koala", "ingsoc", 1, 5);
+
+  VERBOSE_EXPECT_NO_THROW(cluster_->onConfigUpdate(resources));
+
+  {
+    auto& first_hosts_per_locality =
+        cluster_->prioritySet().hostSetsPerPriority()[0]->hostsPerLocality();
+    EXPECT_EQ(3, first_hosts_per_locality.size());
+    EXPECT_EQ(1, first_hosts_per_locality[0].size());
+    EXPECT_EQ(Locality("", "us-east-1a", ""), Locality(first_hosts_per_locality[0][0]->locality()));
+    EXPECT_EQ(3, first_hosts_per_locality[1].size());
+    EXPECT_EQ(Locality("oceania", "koala", "eucalyptus"),
+              Locality(first_hosts_per_locality[1][0]->locality()));
+    EXPECT_EQ(2, first_hosts_per_locality[2].size());
+    EXPECT_EQ(Locality("oceania", "koala", "ingsoc"),
+              Locality(first_hosts_per_locality[2][0]->locality()));
+
+    auto& second_hosts_per_locality =
+        cluster_->prioritySet().hostSetsPerPriority()[1]->hostsPerLocality();
+    EXPECT_EQ(3, second_hosts_per_locality.size());
+    EXPECT_EQ(8, second_hosts_per_locality[0].size());
+    EXPECT_EQ(Locality("", "us-east-1a", ""),
+              Locality(second_hosts_per_locality[0][0]->locality()));
+    EXPECT_EQ(2, second_hosts_per_locality[1].size());
+    EXPECT_EQ(Locality("foo", "bar", "eep"), Locality(second_hosts_per_locality[1][0]->locality()));
+    EXPECT_EQ(5, second_hosts_per_locality[2].size());
+    EXPECT_EQ(Locality("general", "koala", "ingsoc"),
+              Locality(second_hosts_per_locality[2][0]->locality()));
+  }
 }
 
 } // namespace Upstream

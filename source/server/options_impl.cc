@@ -48,6 +48,7 @@ OptionsImpl::OptionsImpl(int argc, char** argv, const HotRestartVersionCb& hot_r
                                         std::thread::hardware_concurrency(), "uint32_t", cmd);
   TCLAP::ValueArg<std::string> config_path("c", "config-path", "Path to configuration file", false,
                                            "", "string", cmd);
+  TCLAP::SwitchArg v2_config_only("", "v2-config-only", "parse config as v2 only", cmd, false);
   TCLAP::ValueArg<std::string> admin_address_path("", "admin-address-path", "Admin address path",
                                                   false, "", "string", cmd);
   TCLAP::ValueArg<std::string> local_address_ip_version("", "local-address-ip-version",
@@ -92,24 +93,36 @@ OptionsImpl::OptionsImpl(int argc, char** argv, const HotRestartVersionCb& hot_r
                                              false, ENVOY_DEFAULT_MAX_OBJ_NAME_LENGTH, "uint64_t",
                                              cmd);
 
+  cmd.setExceptionHandling(false);
   try {
     cmd.parse(argc, argv);
   } catch (TCLAP::ArgException& e) {
-    std::cerr << "error: " << e.error() << std::endl;
-    exit(1);
+    try {
+      cmd.getOutput()->failure(cmd, e);
+    } catch (const TCLAP::ExitException&) {
+      // failure() has already written an informative message to stderr, so all that's left to do
+      // is throw our own exception with the original message.
+      throw MalformedArgvException(e.what());
+    }
+  } catch (const TCLAP::ExitException& e) {
+    // parse() throws an ExitException with status 0 after printing the output for --help and
+    // --version.
+    throw NoServingException();
   }
 
   if (max_obj_name_len.getValue() < 60) {
-    std::cerr << "error: the 'max-obj-name-len' value specified (" << max_obj_name_len.getValue()
-              << ") is less than the minimum value of 60" << std::endl;
-    exit(1);
+    const std::string message = fmt::format(
+        "error: the 'max-obj-name-len' value specified ({}) is less than the minimum value of 60",
+        max_obj_name_len.getValue());
+    std::cerr << message << std::endl;
+    throw MalformedArgvException(message);
   }
 
   if (hot_restart_version_option.getValue()) {
     std::cerr << hot_restart_version_cb(max_stats.getValue(),
                                         max_obj_name_len.getValue() +
                                             Stats::RawStatData::maxStatSuffixLength());
-    exit(0);
+    throw NoServingException();
   }
 
   log_level_ = default_log_level;
@@ -124,8 +137,9 @@ OptionsImpl::OptionsImpl(int argc, char** argv, const HotRestartVersionCb& hot_r
   } else if (mode.getValue() == "validate") {
     mode_ = Server::Mode::Validate;
   } else {
-    std::cerr << "error: unknown mode '" << mode.getValue() << "'" << std::endl;
-    exit(1);
+    const std::string message = fmt::format("error: unknown mode '{}'", mode.getValue());
+    std::cerr << message << std::endl;
+    throw MalformedArgvException(message);
   }
 
   if (local_address_ip_version.getValue() == "v4") {
@@ -133,15 +147,17 @@ OptionsImpl::OptionsImpl(int argc, char** argv, const HotRestartVersionCb& hot_r
   } else if (local_address_ip_version.getValue() == "v6") {
     local_address_ip_version_ = Network::Address::IpVersion::v6;
   } else {
-    std::cerr << "error: unknown IP address version '" << local_address_ip_version.getValue() << "'"
-              << std::endl;
-    exit(1);
+    const std::string message =
+        fmt::format("error: unknown IP address version '{}'", local_address_ip_version.getValue());
+    std::cerr << message << std::endl;
+    throw MalformedArgvException(message);
   }
 
   // For base ID, scale what the user inputs by 10 so that we have spread for domain sockets.
   base_id_ = base_id.getValue() * 10;
   concurrency_ = concurrency.getValue();
   config_path_ = config_path.getValue();
+  v2_config_only_ = v2_config_only.getValue();
   admin_address_path_ = admin_address_path.getValue();
   log_path_ = log_path.getValue();
   restart_epoch_ = restart_epoch.getValue();

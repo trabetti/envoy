@@ -18,9 +18,12 @@ envoy_cc_library(
         "//include/envoy/config:subscription_interface",
         "//include/envoy/event:dispatcher_interface",
         "//include/envoy/local_info:local_info_interface",
+        "//source/common/common:cleanup_lib",
         "//source/common/common:logger_lib",
+        "//source/common/config:resources_lib",
         "//source/common/config:subscription_factory_lib",
         "//source/common/config:utility_lib",
+        "//source/common/protobuf:utility_lib",
     ],
 )
 
@@ -237,6 +240,7 @@ envoy_cc_library(
         "//source/common/network:address_lib",
         "//source/common/network:resolver_lib",
         "//source/common/network:utility_lib",
+        "//source/common/protobuf:utility_lib",
     ],
 )
 

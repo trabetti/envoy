@@ -1,11 +1,12 @@
-# TODO(mattklein123): See if there is a way to put build SHA into a variable.
-# In the meantime, it's required to edit the SHA in this file as well as envoy_build_sha.sh.
+references:
+  envoy-build-image: &envoy-build-image
+    envoyproxy/envoy-build:52f6880ffbf761c9b809fc3ac208900956ff16b4
 
 version: 2
 jobs:
    release:
      docker:
-       - image: lyft/envoy-build:114e24c6fd05fc026492e9d2ca5608694e5ea59d
+       - image: *envoy-build-image
      resource_class: xlarge
      working_directory: /source
      steps:
@@ -16,7 +17,7 @@ jobs:
        - run: ci/docker_tag.sh
    asan:
      docker:
-       - image: lyft/envoy-build:114e24c6fd05fc026492e9d2ca5608694e5ea59d
+       - image: *envoy-build-image
      resource_class: xlarge
      working_directory: /source
      steps:
@@ -24,15 +25,32 @@ jobs:
        - run: ci/do_circle_ci.sh bazel.asan
    tsan:
      docker:
-       - image: lyft/envoy-build:114e24c6fd05fc026492e9d2ca5608694e5ea59d
+       - image: *envoy-build-image
      resource_class: xlarge
      working_directory: /source
      steps:
        - checkout
        - run: ci/do_circle_ci.sh bazel.tsan
+   ipv6_tests:
+     machine: true
+     steps:
+     - checkout
+     - run:
+         name: enable ipv6
+         command: |
+           cat <<'EOF' | sudo tee /etc/docker/daemon.json
+           {
+             "ipv6": true,
+             "fixed-cidr-v6": "2001:db8:1::/64"
+           }
+           EOF
+
+           sudo service docker restart
+     - run: ./ci/do_circle_ci_ipv6_tests.sh
+
    coverage:
      docker:
-       - image: lyft/envoy-build:114e24c6fd05fc026492e9d2ca5608694e5ea59d
+       - image: *envoy-build-image
      resource_class: xlarge
      working_directory: /source
      steps:
@@ -43,7 +61,7 @@ jobs:
            path: /build/envoy/generated/coverage
    format:
      docker:
-       - image: lyft/envoy-build:114e24c6fd05fc026492e9d2ca5608694e5ea59d
+       - image: *envoy-build-image
      resource_class: small
      working_directory: /source
      steps:
@@ -62,13 +80,13 @@ jobs:
        - run: ci/build_container/docker_push.sh
    docs:
      docker:
-       - image: circleci/python:2.7
-     resource_class: small
+       - image: *envoy-build-image
+     resource_class: xlarge
+     working_directory: /source
      steps:
        - checkout
-       - run: docs/build.sh
        - add_ssh_keys
-       - run: docs/publish.sh
+       - run: ci/do_circle_ci.sh docs
    mac:
      macos:
        xcode: "8.3.3"
@@ -88,8 +106,12 @@ workflows:
               only: /^v.*/
       - asan
       - tsan
+      - ipv6_tests
       - coverage
       - format
       - build_image
-      - docs
+      - docs:
+          filters:
+            tags:
+              only: /^v.*/
       - mac

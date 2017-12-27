@@ -36,6 +36,7 @@ public:
   uint64_t baseId() override { return 0; }
   uint32_t concurrency() override { return 1; }
   const std::string& configPath() override { return config_path_; }
+  bool v2ConfigOnly() override { return false; }
   const std::string& adminAddressPath() override { return admin_address_path_; }
   Network::Address::IpVersion localAddressIpVersion() override { return local_address_ip_version_; }
   std::chrono::seconds drainTime() override { return std::chrono::seconds(1); }
@@ -44,7 +45,7 @@ public:
   const std::string& logPath() override { return log_path_; }
   uint64_t restartEpoch() override { return 0; }
   std::chrono::milliseconds fileFlushIntervalMsec() override {
-    return std::chrono::milliseconds(10000);
+    return std::chrono::milliseconds(50);
   }
   Mode mode() const override { return Mode::Serve; }
   const std::string& serviceClusterName() override { return service_cluster_name_; }
@@ -186,7 +187,8 @@ class IntegrationTestServer : Logger::Loggable<Logger::Id::testing>,
                               public Server::ComponentFactory {
 public:
   static IntegrationTestServerPtr create(const std::string& config_path,
-                                         const Network::Address::IpVersion version);
+                                         const Network::Address::IpVersion version,
+                                         std::function<void()> pre_worker_start_test_steps);
   ~IntegrationTestServer();
 
   Server::TestDrainManager& drainManager() { return *drain_manager_; }
@@ -200,7 +202,8 @@ public:
   void setOnWorkerListenerRemovedCb(std::function<void()> on_worker_listener_removed) {
     on_worker_listener_removed_cb_ = on_worker_listener_removed;
   }
-  void start(const Network::Address::IpVersion version);
+  void start(const Network::Address::IpVersion version,
+             std::function<void()> pre_worker_start_test_steps);
   void start();
 
   void waitForCounterGe(const std::string& name, uint64_t value) {
@@ -211,6 +214,12 @@ public:
 
   void waitForGaugeGe(const std::string& name, uint64_t value) {
     while (gauge(name)->value() < value) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+
+  void waitForGaugeEq(const std::string& name, uint64_t value) {
+    while (gauge(name)->value() != value) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
   }

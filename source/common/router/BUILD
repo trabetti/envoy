@@ -14,7 +14,8 @@ envoy_cc_library(
     hdrs = ["config_impl.h"],
     deps = [
         ":config_utility_lib",
-        ":req_header_formatter_lib",
+        ":header_formatter_lib",
+        ":header_parser_lib",
         ":retry_state_lib",
         ":router_ratelimit_lib",
         "//include/envoy/common:optional",
@@ -42,6 +43,7 @@ envoy_cc_library(
     hdrs = ["config_utility.h"],
     external_deps = ["envoy_rds"],
     deps = [
+        "//include/envoy/http:codes_interface",
         "//include/envoy/upstream:resource_manager_interface",
         "//source/common/common:assert_lib",
         "//source/common/common:empty_string",
@@ -56,7 +58,7 @@ envoy_cc_library(
     srcs = ["rds_impl.cc"],
     hdrs = ["rds_impl.h"],
     external_deps = [
-        "envoy_filter_http_connection_manager",
+        "envoy_filter_network_http_connection_manager",
         "envoy_rds",
     ],
     deps = [
@@ -85,7 +87,7 @@ envoy_cc_library(
     srcs = ["rds_subscription.cc"],
     hdrs = ["rds_subscription.h"],
     external_deps = [
-        "envoy_filter_http_connection_manager",
+        "envoy_filter_network_http_connection_manager",
     ],
     deps = [
         "//include/envoy/config:subscription_interface",
@@ -123,8 +125,10 @@ envoy_cc_library(
     name = "router_lib",
     srcs = ["router.cc"],
     hdrs = ["router.h"],
+    external_deps = ["envoy_filter_http_router"],
     deps = [
         ":config_lib",
+        ":header_parser_lib",
         ":retry_state_lib",
         "//include/envoy/event:dispatcher_interface",
         "//include/envoy/event:timer_interface",
@@ -136,10 +140,12 @@ envoy_cc_library(
         "//include/envoy/local_info:local_info_interface",
         "//include/envoy/router:shadow_writer_interface",
         "//include/envoy/runtime:runtime_interface",
+        "//include/envoy/server:filter_config_interface",
         "//include/envoy/stats:stats_interface",
         "//include/envoy/stats:stats_macros",
         "//include/envoy/upstream:cluster_manager_interface",
         "//include/envoy/upstream:upstream_interface",
+        "//source/common/access_log:access_log_lib",
         "//source/common/buffer:watermark_buffer_lib",
         "//source/common/common:assert_lib",
         "//source/common/common:empty_string",
@@ -154,6 +160,8 @@ envoy_cc_library(
         "//source/common/http:headers_lib",
         "//source/common/http:message_lib",
         "//source/common/http:utility_lib",
+        "//source/common/request_info:request_info_lib",
+        "//source/common/tracing:http_tracer_lib",
     ],
 )
 
@@ -186,12 +194,27 @@ envoy_cc_library(
 )
 
 envoy_cc_library(
-    name = "req_header_formatter_lib",
-    srcs = ["req_header_formatter.cc"],
-    hdrs = ["req_header_formatter.h"],
+    name = "header_parser_lib",
+    srcs = ["header_parser.cc"],
+    hdrs = ["header_parser.h"],
     deps = [
-        "//source/common/config:rds_json_lib",
-        "//source/common/http/access_log:access_log_formatter_lib",
+        ":header_formatter_lib",
+        "//include/envoy/http:header_map_interface",
+        "//source/common/config:base_json_lib",
         "//source/common/protobuf:utility_lib",
+    ],
+)
+
+envoy_cc_library(
+    name = "header_formatter_lib",
+    srcs = ["header_formatter.cc"],
+    hdrs = ["header_formatter.h"],
+    deps = [
+        "//include/envoy/common:optional",
+        "//source/common/access_log:access_log_formatter_lib",
+        "//source/common/common:logger_lib",
+        "//source/common/common:utility_lib",
+        "//source/common/config:metadata_lib",
+        "//source/common/json:json_loader_lib",
     ],
 )
