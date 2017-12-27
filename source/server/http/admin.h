@@ -35,7 +35,7 @@ public:
             const std::string& address_out_path, Network::Address::InstanceConstSharedPtr address,
             Server::Instance& server);
 
-  Http::Code runCallback(const std::string& path, Buffer::Instance& response);
+  Http::Code runCallback(const std::string& path, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
   const Network::ListenSocket& socket() override { return *socket_; }
   Network::ListenSocket& mutable_socket() { return *socket_; }
 
@@ -89,6 +89,7 @@ private:
     const std::string help_text_;
     const HandlerCb handler_;
     const bool removable_;
+    const bool isStreaming_;
   };
 
   /**
@@ -121,7 +122,8 @@ private:
   std::string getOutlierBaseEjectionTimeMs(const Upstream::Outlier::Detector* outlier_detector);
   //void addInfoToStream(std::string key, std::string value, Buffer::Instance& response);
   void addInfoToStream(std::string key, std::string value, std::stringstream& info);
-
+  void addHystrixThreadPool(Buffer::Instance& response);
+  void addHystrixCommand(Stats::HystrixStats& stats, Buffer::Instance& response);
   /**
    * URL handlers.
    */
@@ -135,7 +137,7 @@ private:
   Http::Code handlerResetCounters(const std::string& url, Buffer::Instance& response);
   Http::Code handlerServerInfo(const std::string& url, Buffer::Instance& response);
   Http::Code handlerStats(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerHystrixEventStream(const std::string& url, Buffer::Instance& response);
+  Http::Code handlerHystrixEventStream(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
   Http::Code handlerQuitQuitQuit(const std::string& url, Buffer::Instance& response);
   Http::Code handlerListenerInfo(const std::string& url, Buffer::Instance& response);
 
@@ -152,6 +154,9 @@ private:
   Http::SlowDateProviderImpl date_provider_;
   std::vector<Http::ClientCertDetailsType> set_current_client_cert_details_;
   Http::ConnectionManagerListenerStats listener_stats_;
+
+  Event::TimerPtr hystrix_data_timer_;
+  Event::TimerPtr hystrix_ping_timer_;
 };
 
 /**

@@ -20,6 +20,9 @@ namespace Server {
 #define MAKE_ADMIN_HANDLER(X)                                                                      \
   [this](const std::string& url, Buffer::Instance& data) -> Http::Code { return X(url, data); }
 
+#define MAKE_ADMIN_HANDLER_WITH_CALLBACK(X)                                                                      \
+  [this](const std::string& url, Buffer::Instance& data, Http::StreamDecoderFilterCallbacks* callbacks) -> Http::Code { return X(url, data, callbacks); }
+
 /**
  * Global admin HTTP endpoint for the server.
  */

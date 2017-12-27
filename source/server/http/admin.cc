@@ -328,86 +328,50 @@ std::string AdminImpl::getOutlierBaseEjectionTimeMs(const Upstream::Outlier::Det
 }
 
 void AdminImpl::addInfoToStream(std::string key, std::string value, std::stringstream& info) {
-//void AdminImpl::addInfoToStream(std::string key, std::string value, Buffer::Instance& response) {
 	if (info.str().empty())
 		info << "data: {";
 	else
 		info << ", ";
-	//info.add(fmt::format("\"{}\": {}",key, value));
 	info << "\"" + key + "\": " + value;
 }
 
-void accumulateCounters(const Stats::CounterSharedPtr& counter, std::map<std::string, uint64_t>& all_stats) {
-	if (all_stats.find(counter->name()) != all_stats.end()) {
-		all_stats[counter->name()] += counter->value();
-	} else {
-		all_stats[counter->name()] = counter->value();
-	}
-}
-
-void accumulateCounters(const Stats::GaugeSharedPtr& gauge, std::map<std::string, uint64_t>& all_stats) {
-	if (all_stats.find(gauge->name()) != all_stats.end()) {
-		all_stats[gauge->name()] += gauge->value();
-	} else {
-		all_stats[gauge->name()] = gauge->value();
-	}
-}
-
-
-Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::Instance& response) {
-	Http::Code rc = Http::Code::OK;
-	const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
-	std::map<std::string, uint64_t> all_stats;
-
-	Stats::HystrixStats& stats = server_.hystrixStats();
-	stats.incCounter();
-
-	// set timer
-	//std::chrono::milliseconds window = 5000;
-	// starting timer
-	server_.setHystrixStreamTimer(std::chrono::milliseconds(5000));
-
-	for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
-		if (counter->name().find("upstream_rq_") != std::string::npos) {
-			std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
-			accumulateCounters(counter, all_stats);
-			stats.pushNewValue(counter->name(), counter->value());
-		}
-	}
-
-	std::cout << "done reading counters" << std::endl;
-
-	// I think there are no interesting gauges
-//	for (const Stats::GaugeSharedPtr& gauge : server_.stats().gauges()) {
-//		if (gauge->name().find("rq") != std::string::npos) {
-//			std::cout << "gauge name: " << gauge->name() << ", gauge value: " << gauge->value() << std::endl;
-//			accumulateCounters(gauge, all_stats);
-//		}
-//	}
-
-	stats.printRollingWindow();
-
+void AdminImpl::addHystrixThreadPool(Buffer::Instance& response) {
 	for (auto& cluster : server_.clusterManager().clusters()) {
 		std::string cluster_name = cluster.second.get().info()->name();
 		std::cout << "cluster name: " << cluster_name << std::endl;
 
-//		all_stats.clear();
-//		for (const Upstream::HostSharedPtr& host : cluster.second.get().hosts()) {
-//			// must go over all counters since counter(name) is not const
-//			for (const Stats::CounterSharedPtr& counter : host->counters()) {
-//				std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
-//				accumulateCounters(counter, all_stats);
-//			}
-//		}
-		/*
-		 * for (auto& host : cluster.second.get().hosts()) {
-			std::map<std::string, uint64_t> all_stats;
-			for (const Stats::CounterSharedPtr& counter : host->counters()) {
-				all_stats[counter->name()] = counter->value();
-		 */
+		std::stringstream cluster_info;
+
+		addInfoToStream("currentPoolSize", "1", cluster_info);//
+		addInfoToStream("rollingMaxActiveThreads", "13", cluster_info);//
+		addInfoToStream("currentActiveCount", "0", cluster_info);//
+		addInfoToStream("currentCompletedTaskCount", "1234", cluster_info);//
+		addInfoToStream("propertyValue_queueSizeRejectionThreshold"
+				, std::to_string(cluster.second.get().info()->resourceManager(Upstream::ResourcePriority::Default).pendingRequests().max())
+		, cluster_info);//
+		addInfoToStream("type", "HystrixThreadPool", cluster_info);//
+		addInfoToStream("reportingHosts", std::to_string(cluster.second.get().hosts().size()), cluster_info);//    "reportingHosts": 1
+		addInfoToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds", "30000", cluster_info);//
+		addInfoToStream("name", cluster.second.get().info()->name(), cluster_info);//    "name": "PlaylistGet",
+		addInfoToStream("currentLargestPoolSize", "30", cluster_info);//
+		addInfoToStream("currentCorePoolSize", "30", cluster_info);//
+		addInfoToStream("currentQueueSize", "0", cluster_info);//
+		addInfoToStream("currentTaskCount", "5678", cluster_info);//
+		addInfoToStream("rollingCountThreadsExecuted", "100", cluster_info);//
+		addInfoToStream("currentMaximumPoolSize", "30", cluster_info);//
+
+		cluster_info << "}" << std::endl << std::endl;
+		response.add(cluster_info.str());
+
+	}
+}
+
+void AdminImpl::addHystrixCommand(Stats::HystrixStats& stats, Buffer::Instance& response) {
+	for (auto& cluster : server_.clusterManager().clusters()) {
+		std::string cluster_name = cluster.second.get().info()->name();
+		std::cout << "cluster name: " << cluster_name << std::endl;
 
 		std::stringstream cluster_info;
-		//uint64_t overflowed = server_.stats().counter("upstream_rq_pending_overflow").value();
 
 		std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());	  //  data: {
 		addInfoToStream("type", "HystrixCommand", cluster_info);//    "type": "HystrixCommand",
@@ -419,28 +383,26 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::
 		int total = stats.getRollingValue("cluster." + cluster_name + ".upstream_rq_total");
 		addInfoToStream("errorPercentage", (total == 0 ? "0" : std::to_string(errors/total)) , cluster_info);		//    "errorPercentage": 0,
 		addInfoToStream("errorCount", std::to_string(errors)
-//				std::to_string(stats.getRollingValue("cluster." + cluster_name + ".upstream_rq_5xx"))
-				, cluster_info);//    "errorCount": 0,
-//		addInfoToStream("requestCount", std::to_string(all_stats["cluster." + cluster_name + ".upstream_rq_total"]), cluster_info);  //    "requestCount": 121,
-//		addInfoToStream("requestCount", std::to_string(stats.getRollingValue("cluster." + cluster_name + ".upstream_rq_total")), cluster_info);  //    "requestCount": 121,
+		, cluster_info);//    "errorCount": 0,
 		addInfoToStream("requestCount", std::to_string(total), cluster_info);  //    "requestCount": 121,
 		addInfoToStream("rollingCountCollapsedRequests", "0", cluster_info);		//    "rollingCountCollapsedRequests": 0,
 		addInfoToStream("rollingCountExceptionsThrown", "0", cluster_info);		//    "rollingCountExceptionsThrown": 0,
-//		addInfoToStream("rollingCountFailure", std::to_string(all_stats["cluster." + cluster_name + ".upstream_rq_503"]), cluster_info);  //    "requestCount": 121,
 		addInfoToStream("rollingCountFailure", std::to_string(stats.getRollingValue("cluster." + cluster_name + ".upstream_rq_503")), cluster_info);  //    "requestCount": 121,
 		addInfoToStream("rollingCountFallbackFailure", "0", cluster_info);//    "rollingCountFallbackFailure": 0,
 		addInfoToStream("rollingCountFallbackRejection", "0", cluster_info);//    "rollingCountFallbackRejection": 0,
 		addInfoToStream("rollingCountFallbackSuccess", "0", cluster_info);//    "rollingCountFallbackSuccess": 0,
 		addInfoToStream("rollingCountclusterInfosFromCache", "0", cluster_info);//    "rollingCountclusterInfosFromCache": 69,
-		//    "rollingCountSemaphoreRejected": 0,
-		//addInfoToStream("rollingCountShortCircuited", std::to_string(all_stats["cluster." + cluster_name + ".upstream_rq_pending_overflow"]), cluster_info);  //    "requestCount": 121,
+		addInfoToStream("rollingCountSemaphoreRejected", "0", cluster_info);//    "rollingCountSemaphoreRejected": 0,
 		addInfoToStream("rollingCountShortCircuited", std::to_string(stats.getRollingValue("cluster." + cluster_name + ".upstream_rq_pending_overflow")), cluster_info);  //    "requestCount": 121,
-		//addInfoToStream("rollingCountSuccess", std::to_string(all_stats["cluster." + cluster_name + ".upstream_rq_2xx"]), cluster_info);  //    "requestCount": 121,
 		addInfoToStream("rollingCountSuccess", std::to_string(stats.getRollingValue("cluster." + cluster_name + ".upstream_rq_2xx")), cluster_info);  //    "requestCount": 121,
-		//    "rollingCountThreadPoolRejected": 0,
-		//addInfoToStream("rollingCountTimeout", std::to_string(all_stats["cluster." + cluster_name + ".upstream_rq_timeout"]), cluster_info);  //    "requestCount": 121,
+		addInfoToStream("rollingCountThreadPoolRejected", "0", cluster_info);	//    "rollingCountThreadPoolRejected": 0,
 		addInfoToStream("rollingCountTimeout", std::to_string(stats.getRollingValue("cluster." + cluster_name + ".upstream_rq_timeout")), cluster_info);  //    "requestCount": 121,
-		//    "currentConcurrentExecutionCount": 0,
+		addInfoToStream("currentConcurrentExecutionCount", "0", cluster_info);
+		addInfoToStream("latencyExecute_mean", "0", cluster_info);
+		addInfoToStream("latencyExecute",
+				"{\"0\":2,\"25\":4,\"50\":8,\"75\":11,\"90\":12,\"95\":45,\"99\":51,\"99.5\":51,\"100\":51}",
+				cluster_info);
+		//    "": 0,
 		//    "latencyExecute_mean": 13,
 		//    "latencyExecute": {
 		//      "0": 3,
@@ -459,173 +421,81 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::
 				, cluster_info);	//    "propertyValue_circuitBreakerRequestVolumeThreshold": 20,
 		addInfoToStream("propertyValue_circuitBreakerErrorThresholdPercentage",
 				getOutlierBaseEjectionTimeMs(cluster.second.get().outlierDetector())
-				, cluster_info);			//    "propertyValue_circuitBreakerSleepWindowInMilliseconds": 5000,
-		//    "propertyValue_circuitBreakerErrorThresholdPercentage": 50,
+				, cluster_info);	//    "propertyValue_circuitBreakerErrorThresholdPercentage": 50,
 		addInfoToStream("propertyValue_circuitBreakerForceOpen", "false", cluster_info);//  "propertyValue_circuitBreakerForceOpen": false,
 		addInfoToStream("propertyValue_circuitBreakerForceClosed", "false", cluster_info);//  "propertyValue_circuitBreakerForceClosed": false,
-// removed from hystrix(?)		addInfoToStream("propertyValue_circuitBreakerEnabled", "true", cluster_info);//    "propertyValue_circuitBreakerEnabled": true,
-		//    "propertyValue_executionIsolationStrategy": "THREAD",
-		//    "propertyValue_executionIsolationThreadTimeoutInMilliseconds": 800,
-		addInfoToStream("propertyValue_executionIsolationThreadInterruptOnTimeout", "false", cluster_info);		//    "propertyValue_executionIsolationThreadInterruptOnTimeout": true,
-// removed from hystrix(?)				//    "propertyValue_executionIsolationThreadPoolKeyOverride": null,
+		// removed from hystrix(?)		addInfoToStream("propertyValue_circuitBreakerEnabled", "true", cluster_info);//    "propertyValue_circuitBreakerEnabled": true,
+		addInfoToStream("propertyValue_executionIsolationStrategy", "THREAD", cluster_info);//    "propertyValue_executionIsolationStrategy": "THREAD",
+		addInfoToStream("propertyValue_executionIsolationThreadTimeoutInMilliseconds", "THREAD", cluster_info);//    "propertyValue_executionIsolationThreadTimeoutInMilliseconds": 800,
+		addInfoToStream("propertyValue_executionIsolationThreadInterruptOnTimeout", "0", cluster_info);		//    "propertyValue_executionIsolationThreadInterruptOnTimeout": true,
+		// removed from hystrix(?)				//    "propertyValue_executionIsolationThreadPoolKeyOverride": null,
 		addInfoToStream("propertyValue_executionIsolationSemaphoreMaxConcurrentRequests",
 				std::to_string(cluster.second.get().info()->resourceManager(Upstream::ResourcePriority::Default).pendingRequests().max())
 		, cluster_info);  //    "propertyValue_executionIsolationSemaphoreMaxConcurrentRequests": 20,
 		addInfoToStream("propertyValue_fallbackIsolationSemaphoreMaxConcurrentRequests", "0", cluster_info);//    "propertyValue_fallbackIsolationSemaphoreMaxConcurrentRequests": 10,
 		addInfoToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds",
 				std::to_string(cluster.second.get().info()->connectTimeout().count())
-						, cluster_info);  //    "propertyValue_metricsRollingStatisticalWindowInMilliseconds": 10000,
+		, cluster_info);  //    "propertyValue_metricsRollingStatisticalWindowInMilliseconds": 10000,
 		addInfoToStream("propertyValue_requestCacheEnabled", "false", cluster_info);//    "propertyValue_requestCacheEnabled": true,
-		//    "propertyValue_requestLogEnabled": true,
+		addInfoToStream("propertyValue_requestLogEnabled", "true", cluster_info);	//    "propertyValue_requestLogEnabled": true,
 		addInfoToStream("reportingHosts", std::to_string(cluster.second.get().hosts().size()), cluster_info);//    "reportingHosts": 1
-		//  }
 
-		//  if (params.size() == 0) {
-		//    // No Arguments so use the standard.
-		//    for (auto stat : all_stats) {
-		//      response.add(fmt::format("{}: {}\n", stat.first, stat.second));
-		//    }
-		//  } else {
-		//    const std::string format_key = params.begin()->first;
-		//    const std::string format_value = params.begin()->second;
-		//    if (format_key == "format" && format_value == "json") {
-		//      response.add(BuildEventStream(all_stats));
-		//    } else {
-		//      response.add("usage: /hystrix_event_stream?format=json \n");
-		//      response.add("\n");
-		//      rc = Http::Code::NotFound;
-		//    }
-		//  }
-		cluster_info << "}" << std::endl;
+		cluster_info << "}" << std::endl << std::endl;
 		response.add(cluster_info.str());
 	}
+    const auto ms = std::chrono::milliseconds(5000);
+    hystrix_data_timer_->enableTimer(ms);
+
+}
+
+Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks) {
+	Http::Code rc = Http::Code::OK;
+	const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
+	std::map<std::string, uint64_t> all_stats;
+
+	Stats::HystrixStats& stats = server_.hystrixStats();
+	stats.incCounter();
+
+//	hystrix_data_timer_ =
+//			callbacks->dispatcher().createTimer([this]() -> void { addHystrixCommand(stats, response); });
+//    const auto ms = std::chrono::milliseconds(5000);
+//    hystrix_data_timer_->enableTimer(ms);
+
+	hystrix_ping_timer_ =
+			callbacks->dispatcher().createTimer([this]() -> void {
+		std::cout << "ping!" << std::endl;
+	    const auto ms = std::chrono::milliseconds(3000);
+		hystrix_ping_timer_->enableTimer(ms);
+	});
+
+	const auto ms3 = std::chrono::milliseconds(3000);
+    hystrix_ping_timer_->enableTimer(ms3);
+
+    for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
+		if (counter->name().find("upstream_rq_") != std::string::npos) {
+			std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
+			stats.pushNewValue(counter->name(), counter->value());
+		}
+	}
+
+	// I think there are no interesting gauges
+	//	for (const Stats::GaugeSharedPtr& gauge : server_.stats().gauges()) {
+	//		if (gauge->name().find("rq") != std::string::npos) {
+	//			std::cout << "gauge name: " << gauge->name() << ", gauge value: " << gauge->value() << std::endl;
+	//			accumulateCounters(gauge, all_stats);
+	//		}
+	//	}
+
+	std::cout << "done reading counters" << std::endl;
+
+	addHystrixCommand(stats, response);
+	addHystrixThreadPool(response);
+
+	stats.printRollingWindow();
+
 	return rc;
 }
 
-//Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::Instance& response) {
-//	Http::Code rc = Http::Code::OK;
-//	const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
-//	std::map<std::string, uint64_t> all_stats;
-//
-//	for (auto& cluster : server_.clusterManager().clusters()) {
-//		all_stats.clear();
-//		for (const Upstream::HostSharedPtr& host : cluster.second.get().hosts()) {
-//			// must go over all counters since counter(name) is not const
-//			for (const Stats::CounterSharedPtr& counter : host->counters()) {
-//				std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
-//				accumulateCounters(counter, all_stats);
-//			}
-//		}
-//		/*
-//		 * for (auto& host : cluster.second.get().hosts()) {
-//			std::map<std::string, uint64_t> all_stats;
-//			for (const Stats::CounterSharedPtr& counter : host->counters()) {
-//				all_stats[counter->name()] = counter->value();
-//		 */
-//
-//		std::stringstream clusterInfo;
-//		//uint64_t overflowed = server_.stats().counter("upstream_rq_pending_overflow").value();
-//
-//		std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());	  //  data: {
-//		addInfoToStream("type", "HystrixCommand", clusterInfo);//    "type": "HystrixCommand",
-//		addInfoToStream("name", cluster.second.get().info()->name(), clusterInfo);//    "name": "PlaylistGet",
-//		//    "group": "PlaylistGet",
-//		addInfoToStream("currentTime", std::to_string(now), clusterInfo);//    "currentTime": 1355239617628,
-//		addInfoToStream("isCircuitBreakerOpen", (all_stats["rq_pending_overflow"] > 0 ? "true" : "false"), clusterInfo);//    "isCircuitBreakerOpen": false,
-//		//    "errorPercentage": 0,
-//		//    "errorCount": 0,
-//		//		addInfoToStream("requestCount", std::to_string(server_.stats().counter("upstream_rq_total").value())
-//		//		addInfoToStream("requestCount", std::to_string(server_.stats().counter("rq_total").value())
-//		addInfoToStream("requestCount", std::to_string(all_stats["rq_total"]), clusterInfo);  //    "requestCount": 121,
-//		addInfoToStream("rollingCountCollapsedRequests", "0", clusterInfo);		//    "rollingCountCollapsedRequests": 0,
-//		addInfoToStream("rollingCountExceptionsThrown", "0", clusterInfo);		//    "rollingCountExceptionsThrown": 0,
-//		//		addInfoToStream("rollingCountFailure", std::to_string(server_.stats().counter("upstream_rq_5xx").value())
-//		//		addInfoToStream("rollingCountFailure", std::to_string(server_.stats().counter("rq_error").value())
-//		addInfoToStream("rollingCountFailure", std::to_string(all_stats["rq_error"]), clusterInfo);		//    "rollingCountFailure": 0,
-//		addInfoToStream("rollingCountFallbackFailure", "0", clusterInfo);//    "rollingCountFallbackFailure": 0,
-//		addInfoToStream("rollingCountFallbackRejection", "0", clusterInfo);//    "rollingCountFallbackRejection": 0,
-//		addInfoToStream("rollingCountFallbackSuccess", "0", clusterInfo);//    "rollingCountFallbackSuccess": 0,
-//		addInfoToStream("rollingCountclusterInfosFromCache", "0", clusterInfo);//    "rollingCountclusterInfosFromCache": 69,
-//		//    "rollingCountSemaphoreRejected": 0,
-//		addInfoToStream("rollingCountShortCircuited", std::to_string(all_stats["rq_pending_overflow"]), clusterInfo);  //    "rollingCountShortCircuited": 0,
-//		//		addInfoToStream("rollingCountFailure", std::to_string(server_.stats().counter("upstream_rq_2xx").value())
-//		//		addInfoToStream("rollingCountFailure", std::to_string(server_.stats().counter("rq_success").value())
-//		addInfoToStream("rollingCountSuccess", std::to_string(all_stats["rq_success"]), clusterInfo);		//    "rollingCountSuccess": 121,
-//		//    "rollingCountThreadPoolRejected": 0,
-//		//		addInfoToStream("rollingCountTimeout", std::to_string(server_.stats().counter("upstream_rq_timeout").value())
-//		//		addInfoToStream("rollingCountTimeout", std::to_string(server_.stats().counter("rq_timeout").value())
-//		addInfoToStream("rollingCountTimeout", std::to_string(all_stats["rq_timeout"]), clusterInfo); //    "rollingCountTimeout": 0,
-//		//    "currentConcurrentExecutionCount": 0,
-//		//    "latencyExecute_mean": 13,
-//		//    "latencyExecute": {
-//		//      "0": 3,
-//		//      "25": 6,
-//		//      "50": 8,
-//		//      "75": 14,
-//		//      "90": 26,
-//		//      "95": 37,
-//		//      "99": 75,
-//		//      "99.5": 92,
-//		//      "100": 252
-//		//    },
-//		//    "latencyTotal_mean": 15,
-//		//    "latencyTotal": {
-//		//      "0": 3,
-//		//      "25": 7,
-//		//      "50": 10,
-//		//      "75": 18,
-//		//      "90": 32,
-//		//      "95": 43,
-//		//      "99": 88,
-//		//      "99.5": 160,
-//		//      "100": 253
-//		//    },
-//
-//		addInfoToStream("propertyValue_circuitBreakerRequestVolumeThreshold",
-//				getOutlierSuccessRateRequestVolume(cluster.second.get().outlierDetector())
-//				, clusterInfo);	//    "propertyValue_circuitBreakerRequestVolumeThreshold": 20,
-//		addInfoToStream("propertyValue_circuitBreakerErrorThresholdPercentage",
-//				getOutlierBaseEjectionTimeMs(cluster.second.get().outlierDetector())
-//				, clusterInfo);			//    "propertyValue_circuitBreakerSleepWindowInMilliseconds": 5000,
-//		//    "propertyValue_circuitBreakerErrorThresholdPercentage": 50,
-//		addInfoToStream("propertyValue_circuitBreakerForceOpen", "false", clusterInfo);//  "propertyValue_circuitBreakerForceOpen": false,
-//		addInfoToStream("propertyValue_circuitBreakerForceClosed", "false", clusterInfo);//  "propertyValue_circuitBreakerForceClosed": false,
-//		addInfoToStream("propertyValue_circuitBreakerEnabled", "true", clusterInfo);//    "propertyValue_circuitBreakerEnabled": true,
-//		//    "propertyValue_executionIsolationStrategy": "THREAD",
-//		//    "propertyValue_executionIsolationThreadTimeoutInMilliseconds": 800,
-//		addInfoToStream("propertyValue_executionIsolationThreadInterruptOnTimeout", "false", clusterInfo);		//    "propertyValue_executionIsolationThreadInterruptOnTimeout": true,
-//		//    "propertyValue_executionIsolationThreadPoolKeyOverride": null,
-//		addInfoToStream("propertyValue_executionIsolationSemaphoreMaxConcurrentRequests",
-//				std::to_string(cluster.second.get().info()->resourceManager(Upstream::ResourcePriority::Default).pendingRequests().max())
-//		, clusterInfo);  //    "propertyValue_executionIsolationSemaphoreMaxConcurrentRequests": 20,
-//		addInfoToStream("propertyValue_fallbackIsolationSemaphoreMaxConcurrentRequests", "0", clusterInfo);//    "propertyValue_fallbackIsolationSemaphoreMaxConcurrentRequests": 10,
-//		//    "propertyValue_metricsRollingStatisticalWindowInMilliseconds": 10000,
-//		addInfoToStream("propertyValue_requestCacheEnabled", "false", clusterInfo);//    "propertyValue_requestCacheEnabled": true,
-//		//    "propertyValue_requestLogEnabled": true,
-//		addInfoToStream("reportingHosts", "1", clusterInfo);//    "reportingHosts": 1
-//		//  }
-//
-//		//  if (params.size() == 0) {
-//		//    // No Arguments so use the standard.
-//		//    for (auto stat : all_stats) {
-//		//      response.add(fmt::format("{}: {}\n", stat.first, stat.second));
-//		//    }
-//		//  } else {
-//		//    const std::string format_key = params.begin()->first;
-//		//    const std::string format_value = params.begin()->second;
-//		//    if (format_key == "format" && format_value == "json") {
-//		//      response.add(BuildEventStream(all_stats));
-//		//    } else {
-//		//      response.add("usage: /hystrix_event_stream?format=json \n");
-//		//      response.add("\n");
-//		//      rc = Http::Code::NotFound;
-//		//    }
-//		//  }
-//		clusterInfo << "}" << std::endl;
-//		response.add(clusterInfo.str());
-//	}
-//	return rc;
-//}
 
 std::string AdminImpl::statsAsJson(const std::map<std::string, uint64_t>& all_stats) {
 	rapidjson::Document document;
@@ -727,7 +597,7 @@ void AdminFilter::onComplete() {
 	ENVOY_STREAM_LOG(info, "request complete: path: {}", *callbacks_, path);
 
 	Buffer::OwnedImpl response;
-	Http::Code code = parent_.runCallback(path, response);
+	Http::Code code = parent_.runCallback(path, response, callbacks_);
 
 	Http::HeaderMapPtr headers{
 		new Http::HeaderMapImpl{{Http::Headers::get().Status, std::to_string(enumToInt(code))}}};
@@ -750,115 +620,115 @@ AdminImpl::AdminImpl(const std::string& access_log_path, const std::string& prof
   tracing_stats_(Http::ConnectionManagerImpl::generateTracingStats("http.admin.tracing.",
 		  server_.stats())),
 		  handlers_{
-	{"/certs", "print certs on machine", MAKE_ADMIN_HANDLER(handlerCerts), false},
-	{"/clusters", "upstream cluster status", MAKE_ADMIN_HANDLER(handlerClusters), false},
+	{"/certs", "print certs on machine", MAKE_ADMIN_HANDLER(handlerCerts), false, false},
+	{"/clusters", "upstream cluster status", MAKE_ADMIN_HANDLER(handlerClusters), false, false},
 	{"/cpuprofiler", "enable/disable the CPU profiler",
-			MAKE_ADMIN_HANDLER(handlerCpuProfiler), false},
-			{"/healthcheck/fail", "cause the server to fail health checks",
-					MAKE_ADMIN_HANDLER(handlerHealthcheckFail), false},
-					{"/healthcheck/ok", "cause the server to pass health checks",
-							MAKE_ADMIN_HANDLER(handlerHealthcheckOk), false},
-							{"/hot_restart_version", "print the hot restart compatability version",
-									MAKE_ADMIN_HANDLER(handlerHotRestartVersion), false},
-									{"/logging", "query/change logging levels", MAKE_ADMIN_HANDLER(handlerLogging), false},
-									{"/quitquitquit", "exit the server", MAKE_ADMIN_HANDLER(handlerQuitQuitQuit), false},
-									{"/reset_counters", "reset all counters to zero",
-											MAKE_ADMIN_HANDLER(handlerResetCounters), false},
-											{"/server_info", "print server version/status information",
-													MAKE_ADMIN_HANDLER(handlerServerInfo), false},
-													{"/stats", "print server stats", MAKE_ADMIN_HANDLER(handlerStats), false},
-													{"/hystrix_event_stream", "print hystrix event stream", MAKE_ADMIN_HANDLER(handlerHystrixEventStream), false},
-													{"/listeners", "print listener addresses", MAKE_ADMIN_HANDLER(handlerListenerInfo),
-															false}},
-															listener_stats_(
-																	Http::ConnectionManagerImpl::generateListenerStats("http.admin.", server_.stats())) {
+	MAKE_ADMIN_HANDLER(handlerCpuProfiler), false, false},
+	{"/healthcheck/fail", "cause the server to fail health checks",
+	MAKE_ADMIN_HANDLER(handlerHealthcheckFail), false, false},
+	{"/healthcheck/ok", "cause the server to pass health checks",
+	MAKE_ADMIN_HANDLER(handlerHealthcheckOk), false, false},
+	{"/hot_restart_version", "print the hot restart compatibility version",
+	MAKE_ADMIN_HANDLER(handlerHotRestartVersion), false, false},
+	{"/logging", "query/change logging levels", MAKE_ADMIN_HANDLER(handlerLogging), false, false},
+	{"/quitquitquit", "exit the server", MAKE_ADMIN_HANDLER(handlerQuitQuitQuit), false, false},
+	{"/reset_counters", "reset all counters to zero",
+	MAKE_ADMIN_HANDLER(handlerResetCounters), false, false},
+	{"/server_info", "print server version/status information",	MAKE_ADMIN_HANDLER(handlerServerInfo), false, false},
+	{"/stats", "print server stats", MAKE_ADMIN_HANDLER(handlerStats), false, false},
+	{"/hystrix_event_stream", "print hystrix event stream", MAKE_ADMIN_HANDLER_WITH_CALLBACK(handlerHystrixEventStream), false, true},
+	{"/listeners", "print listener addresses", MAKE_ADMIN_HANDLER(handlerListenerInfo),	false, false}},
+	listener_stats_(
+	Http::ConnectionManagerImpl::generateListenerStats("http.admin.", server_.stats())) {
+		if (!address_out_path.empty()) {
+			std::ofstream address_out_file(address_out_path);
+			if (!address_out_file) {
+				ENVOY_LOG(critical, "cannot open admin address output file {} for writing.",
+						address_out_path);
+			} else {
+				address_out_file << socket_->localAddress()->asString();
+			}
+		}
+		access_logs_.emplace_back(new Http::AccessLog::FileAccessLog(
+								access_log_path, {}, Http::AccessLog::AccessLogFormatUtils::defaultAccessLogFormatter(),
+								server.accessLogManager()));
+	}
 
-																if (!address_out_path.empty()) {
-																	std::ofstream address_out_file(address_out_path);
-																	if (!address_out_file) {
-																		ENVOY_LOG(critical, "cannot open admin address output file {} for writing.",
-																				address_out_path);
-																	} else {
-																		address_out_file << socket_->localAddress()->asString();
-																	}
-																}
+	Http::ServerConnectionPtr AdminImpl::createCodec(Network::Connection& connection,
+													const Buffer::Instance&,
+													Http::ServerConnectionCallbacks& callbacks) {
+												return Http::ServerConnectionPtr{
+		new Http::Http1::ServerConnectionImpl(connection, callbacks, Http::Http1Settings())};
+	}
 
-																access_logs_.emplace_back(new Http::AccessLog::FileAccessLog(
-																		access_log_path, {}, Http::AccessLog::AccessLogFormatUtils::defaultAccessLogFormatter(),
-																		server.accessLogManager()));
-															}
+	bool AdminImpl::createFilterChain(Network::Connection& connection) {
+		connection.addReadFilter(Network::ReadFilterSharedPtr{new Http::ConnectionManagerImpl(
+								*this, server_.drainManager(), server_.random(), server_.httpTracer(), server_.runtime(),
+									server_.localInfo(), server_.clusterManager())});
+		return true;
+	}
 
-															Http::ServerConnectionPtr AdminImpl::createCodec(Network::Connection& connection,
-																	const Buffer::Instance&,
-																	Http::ServerConnectionCallbacks& callbacks) {
-																return Http::ServerConnectionPtr{
-																	new Http::Http1::ServerConnectionImpl(connection, callbacks, Http::Http1Settings())};
-															}
+	void AdminImpl::createFilterChain(Http::FilterChainFactoryCallbacks& callbacks) {
+		callbacks.addStreamDecoderFilter(Http::StreamDecoderFilterSharedPtr{new AdminFilter(*this)});
+	}
 
-															bool AdminImpl::createFilterChain(Network::Connection& connection) {
-																connection.addReadFilter(Network::ReadFilterSharedPtr{new Http::ConnectionManagerImpl(
-																		*this, server_.drainManager(), server_.random(), server_.httpTracer(), server_.runtime(),
-																		server_.localInfo(), server_.clusterManager())});
-																return true;
-															}
+	Http::Code AdminImpl::runCallback(const std::string& path, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks) {
+		Http::Code code = Http::Code::OK;
+		bool found_handler = false;
+		for (const UrlHandler& handler : handlers_) {
+			if (path.find(handler.prefix_) == 0) {
+				if (handler.isStreaming_ == true) {
+					code = handler.handler_(path, response, callbacks);
+				} else {
+					code = handler.handler_(path, response);
+				}
+				found_handler = true;
+				break;
+			}
+		}
 
-															void AdminImpl::createFilterChain(Http::FilterChainFactoryCallbacks& callbacks) {
-																callbacks.addStreamDecoderFilter(Http::StreamDecoderFilterSharedPtr{new AdminFilter(*this)});
-															}
+		if (!found_handler) {
+			code = Http::Code::NotFound;
+			response.add("envoy admin commands:\n");
 
-															Http::Code AdminImpl::runCallback(const std::string& path, Buffer::Instance& response) {
-																Http::Code code = Http::Code::OK;
-																bool found_handler = false;
-																for (const UrlHandler& handler : handlers_) {
-																	if (path.find(handler.prefix_) == 0) {
-																		code = handler.handler_(path, response);
-																		found_handler = true;
-																		break;
-																	}
-																}
+			// Prefix order is used during searching, but for printing do them in alpha order.
+			std::map<std::string, const UrlHandler*> sorted_handlers;
+			for (const UrlHandler& handler : handlers_) {
+				sorted_handlers[handler.prefix_] = &handler;
+			}
 
-																if (!found_handler) {
-																	code = Http::Code::NotFound;
-																	response.add("envoy admin commands:\n");
+			for (auto handler : sorted_handlers) {
+				response.add(fmt::format("  {}: {}\n", handler.first, handler.second->help_text_));
+			}
+		}
 
-																	// Prefix order is used during searching, but for printing do them in alpha order.
-																	std::map<std::string, const UrlHandler*> sorted_handlers;
-																	for (const UrlHandler& handler : handlers_) {
-																		sorted_handlers[handler.prefix_] = &handler;
-																	}
+		return code;
+	}
 
-																	for (auto handler : sorted_handlers) {
-																		response.add(fmt::format("  {}: {}\n", handler.first, handler.second->help_text_));
-																	}
-																}
+	const Network::Address::Instance& AdminImpl::localAddress() {
+		return *server_.localInfo().address();
+	}
 
-																return code;
-															}
+	bool AdminImpl::addHandler(const std::string& prefix, const std::string& help_text,
+			HandlerCb callback, bool removable) {
+		auto it = std::find_if(handlers_.cbegin(), handlers_.cend(),
+				[&prefix](const UrlHandler& entry) { return prefix == entry.prefix_; });
+		if (it == handlers_.end()) {
+			handlers_.push_back({prefix, help_text, callback, removable});
+			return true;
+		}
+		return false;
+	}
 
-															const Network::Address::Instance& AdminImpl::localAddress() {
-																return *server_.localInfo().address();
-															}
-
-															bool AdminImpl::addHandler(const std::string& prefix, const std::string& help_text,
-																	HandlerCb callback, bool removable) {
-																auto it = std::find_if(handlers_.cbegin(), handlers_.cend(),
-																		[&prefix](const UrlHandler& entry) { return prefix == entry.prefix_; });
-																if (it == handlers_.end()) {
-																	handlers_.push_back({prefix, help_text, callback, removable});
-																	return true;
-																}
-																return false;
-															}
-
-															bool AdminImpl::removeHandler(const std::string& prefix) {
-																const uint size_before_removal = handlers_.size();
-																handlers_.remove_if(
-																		[&prefix](const UrlHandler& entry) { return prefix == entry.prefix_ && entry.removable_; });
-																if (handlers_.size() != size_before_removal) {
-																	return true;
-																}
-																return false;
-															}
+	bool AdminImpl::removeHandler(const std::string& prefix) {
+		const uint size_before_removal = handlers_.size();
+		handlers_.remove_if(
+				[&prefix](const UrlHandler& entry) { return prefix == entry.prefix_ && entry.removable_; });
+		if (handlers_.size() != size_before_removal) {
+			return true;
+		}
+		return false;
+	}
 
 } // namespace Server
 } // namespace Envoy
