@@ -96,8 +96,8 @@ void StreamEncoderImpl::encodeHeaders(const HeaderMap& headers, bool end_stream)
 }
 
 void StreamEncoderImpl::encodeData(Buffer::Instance& data, bool end_stream) {
-  // end_stream may be indicated with a zero length data buffer. If that is the case, so not
-  // atually write the zero length buffer out.
+  // end_stream may be indicated with a zero length data buffer. If that is the case, do not
+  // actually write the zero length buffer out.
   if (data.length() > 0) {
     if (chunk_encoding_) {
       connection_.buffer().add(fmt::format("{:x}\r\n", data.length()));

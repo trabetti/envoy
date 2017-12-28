@@ -111,9 +111,6 @@ public:
     // validation mock.
     return nullptr;
   }
-  void setHystrixStreamTimer(const std::chrono::milliseconds& d) override {
-	std::cout << std::to_string(d.count()) << std::endl;
-  }
   Stats::HystrixStats& hystrixStats() override { return hystrix_stats_; }
 
 

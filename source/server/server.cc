@@ -163,11 +163,6 @@ void InstanceImpl::sendHystrixMessage() {
 	std::cout << "Hystrix timer: " <<  std::put_time(&tm, "%d-%m-%Y %H-%M-%S") << std::endl;
 }
 
-void InstanceImpl::setHystrixStreamTimer(const std::chrono::milliseconds& d){
-	std::cout << "starting timer" << std::endl;
-	stat_flush_timer_->enableTimer(d);
-}
-
 bool InstanceImpl::healthCheckFailed() { return server_stats_->live_.value() == 0; }
 
 void InstanceUtil::loadBootstrapConfig(envoy::api::v2::Bootstrap& bootstrap,

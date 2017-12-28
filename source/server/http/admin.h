@@ -87,7 +87,6 @@ private:
     const std::string help_text_;
     const HandlerCb handler_;
     const bool removable_;
-    const bool isStreaming_;
   };
 
   /**
@@ -114,7 +113,7 @@ private:
   void addOutlierInfo(const std::string& cluster_name,
                       const Upstream::Outlier::Detector* outlier_detector,
                       Buffer::Instance& response);
-  std::string statsAsJson(const std::map<std::string, uint64_t>& all_stats);
+  static std::string statsAsJson(const std::map<std::string, uint64_t>& all_stats);
   static void statsAsPrometheus(const std::list<Stats::CounterSharedPtr>& counters,
                                 const std::list<Stats::GaugeSharedPtr>& gauges,
                                 Buffer::Instance& response);
@@ -122,30 +121,33 @@ private:
   static std::string formatTagsForPrometheus(const std::vector<Stats::Tag>& tags);
   static std::string prometheusMetricName(const std::string& extractedName);
 
-  std::string BuildEventStream(const std::map<std::string, std::string>& all_stats);
   std::string getOutlierSuccessRateRequestVolume(const Upstream::Outlier::Detector* outlier_detector);
   std::string getOutlierBaseEjectionTimeMs(const Upstream::Outlier::Detector* outlier_detector);
-  //void addInfoToStream(std::string key, std::string value, Buffer::Instance& response);
+  void addStringToStream(std::string key, std::string value, std::stringstream& info);
+  void addIntToStream(std::string key, uint64_t value, std::stringstream& info);
   void addInfoToStream(std::string key, std::string value, std::stringstream& info);
-  void addHystrixThreadPool(Buffer::Instance& response);
-  void addHystrixCommand(Stats::HystrixStats& stats, Buffer::Instance& response);
+  void addHystrixThreadPool(std::stringstream& ss);
+  void addHystrixCommand(std::stringstream& ss);
+  void updateHystrixRollingWindow();
+  void prepareAndSendHystrixStream();
+
 
   /**
    * URL handlers.
    */
-  Http::Code handlerCerts(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerClusters(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerCpuProfiler(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerHealthcheckFail(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerHealthcheckOk(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerHotRestartVersion(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerLogging(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerResetCounters(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerServerInfo(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerStats(const std::string& url, Buffer::Instance& response);
+  Http::Code handlerCerts(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerClusters(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerCpuProfiler(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerHealthcheckFail(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerHealthcheckOk(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerHotRestartVersion(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerLogging(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerResetCounters(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerServerInfo(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerStats(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
   Http::Code handlerHystrixEventStream(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerQuitQuitQuit(const std::string& url, Buffer::Instance& response);
-  Http::Code handlerListenerInfo(const std::string& url, Buffer::Instance& response);
+  Http::Code handlerQuitQuitQuit(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerListenerInfo(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
 
   Server::Instance& server_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
@@ -160,6 +162,7 @@ private:
   Http::SlowDateProviderImpl date_provider_;
   std::vector<Http::ClientCertDetailsType> set_current_client_cert_details_;
   Http::ConnectionManagerListenerStats listener_stats_;
+  Stats::HystrixStats& hystrix_stats_;
 
   Event::TimerPtr hystrix_data_timer_;
   Event::TimerPtr hystrix_ping_timer_;

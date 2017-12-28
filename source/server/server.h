@@ -165,7 +165,6 @@ public:
   Tracing::HttpTracer& httpTracer() override;
   ThreadLocal::Instance& threadLocal() override { return thread_local_; }
   const LocalInfo::LocalInfo& localInfo() override { return *local_info_; }
-  void setHystrixStreamTimer(const std::chrono::milliseconds& d) override;
   Stats::HystrixStats& hystrixStats() override { return *hystrix_stats_; }
 
 private:
