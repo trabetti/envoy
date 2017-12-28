@@ -111,7 +111,7 @@ public:
     // validation mock.
     return nullptr;
   }
-  Stats::HystrixStats& hystrixStats() override { return hystrix_stats_; }
+//  Stats::HystrixStats& hystrixStats() override { return hystrix_stats_; }
 
 
 private:
@@ -136,7 +136,7 @@ private:
   std::unique_ptr<Upstream::ValidationClusterManagerFactory> cluster_manager_factory_;
   InitManagerImpl init_manager_;
   ListenerManagerImpl listener_manager_;
-  Stats::HystrixStatsImpl hystrix_stats_;
+//  Stats::HystrixStatsImpl hystrix_stats_;
 };
 
 } // namespace Server

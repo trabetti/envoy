@@ -442,7 +442,7 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::
 
 	// start streaming
 	hystrix_data_timer_ =
-				callbacks->dispatcher().createTimer([this]() -> void { prepareAndSendHystrixStream(); });
+	      callbacks->dispatcher().createTimer([this, callbacks]() -> void { prepareAndSendHystrixStream(callbacks); });
 	    const auto ms = std::chrono::milliseconds(5000);
 	    hystrix_data_timer_->enableTimer(ms);
 
@@ -548,24 +548,24 @@ void AdminImpl::addHystrixCommand(std::stringstream& ss) {
 		addStringToStream("group", "NA", cluster_info);		//    "group": "PlaylistGet",
 		addIntToStream("currentTime", now, cluster_info);//    "currentTime": 1355239617628,
 		addInfoToStream("isCircuitBreakerOpen", "false", cluster_info);//    "isCircuitBreakerOpen": false,
-		int errors = hystrix_stats_.getRollingValue("cluster." + cluster_name + ".upstream_rq_5xx");
-		int total = hystrix_stats_.getRollingValue("cluster." + cluster_name + ".upstream_rq_total");
+		int errors = hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_5xx");
+		int total = hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_total");
 		addIntToStream("errorPercentage", (total == 0 ? 0 : (errors/total)*100) , cluster_info);		//    "errorPercentage": 0,
 		addIntToStream("errorCount", errors
 				, cluster_info);//    "errorCount": 0,
 		addIntToStream("requestCount", total, cluster_info);  //    "requestCount": 121,
 		addIntToStream("rollingCountCollapsedRequests", 0, cluster_info);		//    "rollingCountCollapsedRequests": 0,
 		addIntToStream("rollingCountExceptionsThrown", 0, cluster_info);		//    "rollingCountExceptionsThrown": 0,
-		addIntToStream("rollingCountFailure", hystrix_stats_.getRollingValue("cluster." + cluster_name + ".upstream_rq_503"), cluster_info);  //    "requestCount": 121,
+		addIntToStream("rollingCountFailure", hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_503"), cluster_info);  //    "requestCount": 121,
 		addIntToStream("rollingCountFallbackFailure", 0, cluster_info);//    "rollingCountFallbackFailure": 0,
 		addIntToStream("rollingCountFallbackRejection", 0, cluster_info);//    "rollingCountFallbackRejection": 0,
 		addIntToStream("rollingCountFallbackSuccess", 0, cluster_info);//    "rollingCountFallbackSuccess": 0,
 		addIntToStream("rollingCountResponsesFromCache", 0, cluster_info);//    "rollingCountResponsesFromCache": 69,
 		addIntToStream("rollingCountSemaphoreRejected", 0, cluster_info);//    "rollingCountSemaphoreRejected": 0,
-		addIntToStream("rollingCountShortCircuited", hystrix_stats_.getRollingValue("cluster." + cluster_name + ".upstream_rq_pending_overflow"), cluster_info);  //    "requestCount": 121,
-		addIntToStream("rollingCountSuccess", hystrix_stats_.getRollingValue("cluster." + cluster_name + ".upstream_rq_2xx"), cluster_info);  //    "requestCount": 121,
+		addIntToStream("rollingCountShortCircuited", hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_pending_overflow"), cluster_info);  //    "requestCount": 121,
+		addIntToStream("rollingCountSuccess", hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_2xx"), cluster_info);  //    "requestCount": 121,
 		addIntToStream("rollingCountThreadPoolRejected", 0, cluster_info);	//    "rollingCountThreadPoolRejected": 0,
-		addIntToStream("rollingCountTimeout", hystrix_stats_.getRollingValue("cluster." + cluster_name + ".upstream_rq_timeout"), cluster_info);  //    "requestCount": 121,
+		addIntToStream("rollingCountTimeout", hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_timeout"), cluster_info);  //    "requestCount": 121,
 		addIntToStream("rollingCountBadRequests", 0, cluster_info);	//    "rollingCountBadRequests": 0,
 		addIntToStream("currentConcurrentExecutionCount", 0, cluster_info);
 		addInfoToStream("latencyExecute_mean", "0", cluster_info);
@@ -607,12 +607,12 @@ void AdminImpl::addHystrixCommand(std::stringstream& ss) {
 }
 
 void AdminImpl::updateHystrixRollingWindow() {
-  hystrix_stats_.incCounter();
+  hystrix_stats_->incCounter();
 
   for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
     if (counter->name().find("upstream_rq_") != std::string::npos) {
       std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
-      hystrix_stats_.pushNewValue(counter->name(), counter->value());
+      hystrix_stats_->pushNewValue(counter->name(), counter->value());
     }
   }
 
@@ -620,7 +620,7 @@ void AdminImpl::updateHystrixRollingWindow() {
   //  for (const Stats::GaugeSharedPtr& gauge : server_.stats().gauges()) {
   //    if (gauge->name().find("rq") != std::string::npos) {
   //      std::cout << "gauge name: " << gauge->name() << ", gauge value: " << gauge->value() << std::endl;
-  //    hystrix_stats_.pushNewValue(gauge->name(), gauge->value());
+  //    hystrix_stats_->pushNewValue(gauge->name(), gauge->value());
   //    }
   //  }
 
@@ -628,11 +628,13 @@ void AdminImpl::updateHystrixRollingWindow() {
 
 }
 
-void AdminImpl::prepareAndSendHystrixStream() {
-  //updateHystrixRollingWindow();
+void AdminImpl::prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* callbacks) {
+  UNREFERENCED_PARAMETER(callbacks);
+
+  updateHystrixRollingWindow();
 
   std::stringstream ss;
-  //addHystrixCommand(ss);
+  addHystrixCommand(ss);
 
   addHystrixThreadPool(ss);
 
@@ -696,7 +698,7 @@ AdminImpl::AdminImpl(const std::string& access_log_path, const std::string& prof
            false}},
       listener_stats_(
           Http::ConnectionManagerImpl::generateListenerStats("http.admin.", listener_scope)),
-       hystrix_stats_(server_.hystrixStats()) {
+       hystrix_stats_(new Stats::HystrixStatsImpl(10)) {
 
   if (!address_out_path.empty()) {
     std::ofstream address_out_file(address_out_path);

@@ -20,7 +20,7 @@
 #include "envoy/thread_local/thread_local.h"
 #include "envoy/tracing/http_tracer.h"
 #include "envoy/upstream/cluster_manager.h"
-#include "envoy/stats/hystrix_stats.h"
+//#include "envoy/stats/hystrix_stats.h"
 
 namespace Envoy {
 namespace Server {
@@ -181,7 +181,7 @@ public:
    */
   virtual const LocalInfo::LocalInfo& localInfo() PURE;
 
-  virtual Stats::HystrixStats& hystrixStats() PURE;
+//  virtual Stats::HystrixStats& hystrixStats() PURE;
 
 };
 

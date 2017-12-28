@@ -272,15 +272,12 @@ void InstanceImpl::initialize(Options& options,
   stat_flush_timer_ = dispatcher_->createTimer([this]() -> void { flushStats(); });
   stat_flush_timer_->enableTimer(config_->statsFlushInterval());
 
-  std::cout << "creating timer" << std::endl;
-  hystrix_stream_timer_ = dispatcher_->createTimer([this]() -> void { sendHystrixMessage(); });
-
   // GuardDog (deadlock detection) object and thread setup before workers are
   // started and before our own run() loop runs.
   guard_dog_.reset(
       new Server::GuardDogImpl(stats_store_, *config_, ProdMonotonicTimeSource::instance_));
 
-  hystrix_stats_.reset(new Stats::HystrixStatsImpl(10));
+//  hystrix_stats_.reset(new Stats::HystrixStatsImpl(10));
 }
 
 void InstanceImpl::startWorkers() {

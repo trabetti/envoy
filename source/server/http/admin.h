@@ -18,6 +18,7 @@
 #include "common/http/utility.h"
 
 #include "server/config/network/http_connection_manager.h"
+#include "common/stats/hystrix_stats_impl.h"
 
 namespace Envoy {
 namespace Server {
@@ -129,7 +130,7 @@ private:
   void addHystrixThreadPool(std::stringstream& ss);
   void addHystrixCommand(std::stringstream& ss);
   void updateHystrixRollingWindow();
-  void prepareAndSendHystrixStream();
+  void prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* callbacks);
 
 
   /**
@@ -162,7 +163,8 @@ private:
   Http::SlowDateProviderImpl date_provider_;
   std::vector<Http::ClientCertDetailsType> set_current_client_cert_details_;
   Http::ConnectionManagerListenerStats listener_stats_;
-  Stats::HystrixStats& hystrix_stats_;
+  //Stats::HystrixStatsImpl& hystrix_stats_;
+  std::unique_ptr<Stats::HystrixStatsImpl> hystrix_stats_;
 
   Event::TimerPtr hystrix_data_timer_;
   Event::TimerPtr hystrix_ping_timer_;
