@@ -440,18 +440,34 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::
 	Http::Code rc = Http::Code::OK;
 	const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
 
+	Buffer::OwnedImpl data;
+	std::map<std::string, std::string> m_headers;
+	std::stringstream ss;
+	ss << "HTTP/1.1" << " " << /*enumToInt(Http::Code::OK)*/ "200" << " " << "OK" << "\r\n";
+	m_headers[Http::Headers::get().ContentType.get()] = "text/event-stream";
+	m_headers["Cache-Control"] = "no-cache";
+	m_headers[Http::Headers::get().Connection.get()] = Http::Headers::get().ConnectionValues.Close;
+	m_headers[Http::Headers::get().AccessControlAllowHeaders.get()] = "Accept, Cache-Control, X-Requested-With, Last-Event-ID";
+	m_headers[Http::Headers::get().AccessControlAllowOrigin.get()] = "*";
+
+	for(std::map<std::string, std::string>::value_type& header : m_headers) {
+	  ss << header.first << ": " << header.second << "\r\n";
+	}
+	ss << "\r\n" << ":ok\n\n";
+
+	data.drain(data.length());
+	data.add(ss.str());
+	(const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
+
 	// start streaming
 	hystrix_data_timer_ =
-	      callbacks->dispatcher().createTimer([this, callbacks]() -> void { prepareAndSendHystrixStream(callbacks); });
+			callbacks->dispatcher().createTimer([this,callbacks]() -> void { prepareAndSendHystrixStream(callbacks); });
 	    const auto ms = std::chrono::milliseconds(5000);
 	    hystrix_data_timer_->enableTimer(ms);
 
 	// start ping
 	hystrix_ping_timer_ =
-			callbacks->dispatcher().createTimer([this]() -> void {
-		std::cout << "ping!" << std::endl;
-		const auto ms = std::chrono::milliseconds(3000);
-		hystrix_ping_timer_->enableTimer(ms);
+			callbacks->dispatcher().createTimer([this,callbacks]() -> void { prepareAndHystrixPingMessage(callbacks);
 	});
 
 	const auto ms3 = std::chrono::milliseconds(3000);
@@ -629,8 +645,6 @@ void AdminImpl::updateHystrixRollingWindow() {
 }
 
 void AdminImpl::prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
-
   updateHystrixRollingWindow();
 
   std::stringstream ss;
@@ -640,26 +654,36 @@ void AdminImpl::prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* 
 
   std::cout << "hystrix message:" << std::endl;
   std::cout << ss.str() << std::endl;
-
+  std::string dataMsg = ss.str();
+  Buffer::OwnedImpl data;
+  data.add(dataMsg);
+  (const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
   const auto ms = std::chrono::milliseconds(5000);
   hystrix_data_timer_->enableTimer(ms);
 }
 
+void AdminImpl::prepareAndHystrixPingMessage(Http::StreamDecoderFilterCallbacks* callbacks) {
+  std::string pingMsg = ":\n\n";
+  Buffer::OwnedImpl data;
+  data.add(pingMsg);
+  (const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
+  const auto ms = std::chrono::milliseconds(3000);
+  hystrix_ping_timer_->enableTimer(ms);
+}
 
 void AdminFilter::onComplete() {
   std::string path = request_headers_->Path()->value().c_str();
   ENVOY_STREAM_LOG(debug, "request complete: path: {}", *callbacks_, path);
 
   Buffer::OwnedImpl response;
-  Http::Code code = parent_.runCallback(path, response, callbacks_);
-
-  Http::HeaderMapPtr headers{
+  /*Http::Code code =*/ parent_.runCallback(path, response, callbacks_);
+  /*Http::HeaderMapPtr headers{
       new Http::HeaderMapImpl{{Http::Headers::get().Status, std::to_string(enumToInt(code))}}};
   callbacks_->encodeHeaders(std::move(headers), response.length() == 0);
 
   if (response.length() > 0) {
     callbacks_->encodeData(response, true);
-  }
+  }*/
 }
 
 AdminImpl::NullRouteConfigProvider::NullRouteConfigProvider()

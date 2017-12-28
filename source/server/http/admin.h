@@ -131,7 +131,7 @@ private:
   void addHystrixCommand(std::stringstream& ss);
   void updateHystrixRollingWindow();
   void prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* callbacks);
-
+  void prepareAndHystrixPingMessage(Http::StreamDecoderFilterCallbacks* callbacks);
 
   /**
    * URL handlers.
