@@ -419,7 +419,7 @@ Http::Code AdminImpl::handlerListenerInfo(const std::string&, Buffer::Instance& 
 Http::Code AdminImpl::handlerCerts(const std::string&, Buffer::Instance& response,
     Http::StreamDecoderFilterCallbacks* callbacks) {
   UNREFERENCED_PARAMETER(callbacks);
- // This set is used to track distinct certificates. We may have multiple listeners, upstreams, etc
+  // This set is used to track distinct certificates. We may have multiple listeners, upstreams, etc
   // using the same cert.
   std::unordered_set<std::string> context_info_set;
   std::string context_format = "{{\n\t\"ca_cert\": \"{}\",\n\t\"cert_chain\": \"{}\"\n}}\n";
@@ -440,41 +440,40 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::
 	Http::Code rc = Http::Code::OK;
 	const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
 
-	Buffer::OwnedImpl data;
-	std::map<std::string, std::string> m_headers;
-	std::stringstream ss;
-	ss << "HTTP/1.1" << " " << /*enumToInt(Http::Code::OK)*/ "200" << " " << "OK" << "\r\n";
-	m_headers[Http::Headers::get().ContentType.get()] = "text/event-stream";
-	m_headers["Cache-Control"] = "no-cache";
-	m_headers[Http::Headers::get().Connection.get()] = Http::Headers::get().ConnectionValues.Close;
-	m_headers[Http::Headers::get().AccessControlAllowHeaders.get()] = "Accept, Cache-Control, X-Requested-With, Last-Event-ID";
-	m_headers[Http::Headers::get().AccessControlAllowOrigin.get()] = "*";
-
-	for(std::map<std::string, std::string>::value_type& header : m_headers) {
-	  ss << header.first << ": " << header.second << "\r\n";
-	}
-	ss << "\r\n" << ":ok\n\n";
-
-	data.drain(data.length());
-	data.add(ss.str());
-	(const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
+//	Buffer::OwnedImpl data;
+//	std::map<std::string, std::string> m_headers;
+//	std::stringstream ss;
+//	ss << "HTTP/1.1" << " " << /*enumToInt(Http::Code::OK)*/ "200" << " " << "OK" << "\r\n";
+//	m_headers[Http::Headers::get().ContentType.get()] = "text/event-stream";
+//	m_headers["Cache-Control"] = "no-cache";
+//	m_headers[Http::Headers::get().Connection.get()] = Http::Headers::get().ConnectionValues.Close;
+//	m_headers[Http::Headers::get().AccessControlAllowHeaders.get()] = "Accept, Cache-Control, X-Requested-With, Last-Event-ID";
+//	m_headers[Http::Headers::get().AccessControlAllowOrigin.get()] = "*";
+//
+//	for(std::map<std::string, std::string>::value_type& header : m_headers) {
+//	  ss << header.first << ": " << header.second << "\r\n";
+//	}
+//	ss << "\r\n" << ":ok\n\n";
+//
+//	data.drain(data.length());
+//	data.add(ss.str());
+//	(const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
 
 	// start streaming
 	hystrix_data_timer_ =
 			callbacks->dispatcher().createTimer([this,callbacks]() -> void { prepareAndSendHystrixStream(callbacks); });
-	    const auto ms = std::chrono::milliseconds(5000);
-	    hystrix_data_timer_->enableTimer(ms);
+  const auto ms = std::chrono::milliseconds(5000);
+	hystrix_data_timer_->enableTimer(ms);
 
 	// start ping
 	hystrix_ping_timer_ =
-			callbacks->dispatcher().createTimer([this,callbacks]() -> void { prepareAndHystrixPingMessage(callbacks);
+			callbacks->dispatcher().createTimer([this,callbacks]() -> void {  sendKeepAlivePing(callbacks);
 	});
+  const auto ms3 = std::chrono::milliseconds(3000);
+  hystrix_ping_timer_->enableTimer(ms3);
 
-	const auto ms3 = std::chrono::milliseconds(3000);
-	hystrix_ping_timer_->enableTimer(ms3);
-
-	response.add("");
-	return rc;
+  response.add("");
+  return rc;
 }
 
 std::string AdminImpl::getOutlierSuccessRateRequestVolume(const Upstream::Outlier::Detector* outlier_detector) {
@@ -644,12 +643,22 @@ void AdminImpl::updateHystrixRollingWindow() {
 
 }
 
+void AdminImpl::sendKeepAlivePing(Http::StreamDecoderFilterCallbacks* callbacks) {
+  std::cout << "ping!" << std::endl;
+  std::string pingMsg = ":\n\n";
+  Buffer::OwnedImpl data;
+  data.add(pingMsg);
+  (const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
+  const auto ms = std::chrono::milliseconds(3000);
+  hystrix_ping_timer_->enableTimer(ms);  std::cout << "done AdminImpl::sendKeepAlivePing" << std::endl;
+
+}
+
 void AdminImpl::prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* callbacks) {
   updateHystrixRollingWindow();
 
   std::stringstream ss;
   addHystrixCommand(ss);
-
   addHystrixThreadPool(ss);
 
   std::cout << "hystrix message:" << std::endl;
@@ -658,32 +667,29 @@ void AdminImpl::prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* 
   Buffer::OwnedImpl data;
   data.add(dataMsg);
   (const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
+
   const auto ms = std::chrono::milliseconds(5000);
   hystrix_data_timer_->enableTimer(ms);
+  std::cout << "done AdminImpl::prepareAndSendHystrixStream" << std::endl;
 }
 
-void AdminImpl::prepareAndHystrixPingMessage(Http::StreamDecoderFilterCallbacks* callbacks) {
-  std::string pingMsg = ":\n\n";
-  Buffer::OwnedImpl data;
-  data.add(pingMsg);
-  (const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
-  const auto ms = std::chrono::milliseconds(3000);
-  hystrix_ping_timer_->enableTimer(ms);
-}
 
 void AdminFilter::onComplete() {
   std::string path = request_headers_->Path()->value().c_str();
   ENVOY_STREAM_LOG(debug, "request complete: path: {}", *callbacks_, path);
 
   Buffer::OwnedImpl response;
-  /*Http::Code code =*/ parent_.runCallback(path, response, callbacks_);
-  /*Http::HeaderMapPtr headers{
+  Http::Code code = parent_.runCallback(path, response, callbacks_);
+
+  Http::HeaderMapPtr headers{
       new Http::HeaderMapImpl{{Http::Headers::get().Status, std::to_string(enumToInt(code))}}};
-  callbacks_->encodeHeaders(std::move(headers), response.length() == 0);
+  //callbacks_->encodeHeaders(std::move(headers), response.length() == 0);
+  callbacks_->encodeHeaders(std::move(headers), false);
 
   if (response.length() > 0) {
     callbacks_->encodeData(response, true);
-  }*/
+ //   callbacks_->encodeData(response, false);
+  }
 }
 
 AdminImpl::NullRouteConfigProvider::NullRouteConfigProvider()
