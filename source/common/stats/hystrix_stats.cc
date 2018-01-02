@@ -3,10 +3,10 @@
 namespace Envoy {
 namespace Stats {
 
-// defaultconstructor
-HystrixStats::HystrixStats() {
-  HystrixStats(0);
-}
+//// defaultconstructor
+//HystrixStats::HystrixStats() {
+//  HystrixStats(0);
+//}
 
 // constructor
 HystrixStats::HystrixStats(int num_of_buckets) {
@@ -50,6 +50,19 @@ void HystrixStats::printRollingWindow() {
 	    std::cout << std::endl;
 	}
 }
+
+
+void HystrixStats::resetRollingWindow() {
+  for (std::map<std::string, RollingStats>::iterator it=rolling_stats_.begin(); it!=rolling_stats_.end(); ++it) {
+      RollingStats rollingStats = it->second;
+ //     rollingStats.clear();
+
+      for (int i=0; i< num_of_buckets_; i++) {
+        rollingStats[i] = 0;
+      }
+  }
+}
+
 
 } // namespace Stats
 } // namespace Envoy

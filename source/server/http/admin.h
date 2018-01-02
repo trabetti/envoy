@@ -131,7 +131,7 @@ private:
   void updateHystrixRollingWindow();
   void prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* callbacks);
   void sendKeepAlivePing(Http::StreamDecoderFilterCallbacks* callbacks);
-
+//  const std::string buildTagStr(const std::vector<Stats::Tag>& tags); // copied from statsd
   /**
    * URL handlers.
    */

@@ -282,6 +282,8 @@ Http::Code AdminImpl::handlerResetCounters(const std::string&, Buffer::Instance&
     counter->reset();
   }
 
+  hystrix_stats_->resetRollingWindow();
+
   response.add("OK\n");
   return Http::Code::OK;
 }
@@ -440,7 +442,7 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::
   Http::Code rc = Http::Code::OK;
   const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
 
-  // sending our own OK since it needs speific header
+  // sending our own OK since it needs specific header
   Http::HeaderMapPtr headers{
     new Http::HeaderMapImpl{{Http::Headers::get().Status, std::to_string(enumToInt(rc))},//}};
       {Http::Headers::get().ContentType, Http::Headers::get().ContentTypeValues.TextEventStream},
@@ -448,23 +450,26 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Buffer::
       {Http::Headers::get().Connection, Http::Headers::get().ConnectionValues.Close},
       {Http::Headers::get().AccessControlAllowHeaders, Http::Headers::get().AccessControlAllowHeadersValue.AccessControlAllowHeadersHystrix},
       {Http::Headers::get().AccessControlAllowOrigin, "*"},
-      {Http::Headers::get().NoChunks, "0"}
+      {Http::Headers::get().NoChunks, "0"} // parameter to encodeHeaders
     }};
 
   callbacks->encodeHeaders(std::move(headers), false);
 
   // start streaming
   hystrix_data_timer_ =
-      callbacks->dispatcher().createTimer([this,callbacks]() -> void { prepareAndSendHystrixStream(callbacks); });
-  const auto ms = std::chrono::milliseconds(5000);
-	hystrix_data_timer_->enableTimer(ms);
+      callbacks->dispatcher().createTimer(
+          [this,callbacks]() -> void { prepareAndSendHystrixStream(callbacks); });
+  //const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS);
+  hystrix_data_timer_->enableTimer(
+      std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS));
 
-	// start ping
-	hystrix_ping_timer_ =
-			callbacks->dispatcher().createTimer([this,callbacks]() -> void {  sendKeepAlivePing(callbacks);
-	});
-  const auto ms3 = std::chrono::milliseconds(3000);
-  hystrix_ping_timer_->enableTimer(ms3);
+  // start ping
+  hystrix_ping_timer_ =
+      callbacks->dispatcher().createTimer(
+          [this,callbacks]() -> void {  sendKeepAlivePing(callbacks);
+  });
+  //const auto ms3 = std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS);
+  hystrix_ping_timer_->enableTimer(std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS));
 
   response.add("");
   return rc;
@@ -502,25 +507,25 @@ void AdminImpl::addHystrixThreadPool(std::stringstream& ss) {
 		std::string cluster_name = cluster.second.get().info()->name();
 		//std::cout << "cluster name: " << cluster_name << std::endl;
 
-		addIntToStream("currentPoolSize", 1, cluster_info);//
-		addIntToStream("rollingMaxActiveThreads", 13, cluster_info);//
-		addIntToStream("currentActiveCount", 0, cluster_info);//
-		addIntToStream("currentCompletedTaskCount", 1234, cluster_info);//
+		addIntToStream("currentPoolSize", 1, cluster_info);
+		addIntToStream("rollingMaxActiveThreads", 13, cluster_info);
+		addIntToStream("currentActiveCount", 0, cluster_info);
+		addIntToStream("currentCompletedTaskCount", 1234, cluster_info);
 		addIntToStream("propertyValue_queueSizeRejectionThreshold"
 				, cluster.second.get().info()->resourceManager(Upstream::ResourcePriority::Default).pendingRequests().max()
-				, cluster_info);//
-		addStringToStream("type", "HystrixThreadPool", cluster_info);//
+				, cluster_info);
+		addStringToStream("type", "HystrixThreadPool", cluster_info);
 
-		addIntToStream("reportingHosts", cluster.second.get().prioritySet().hostSetsPerPriority().size(), cluster_info);//    "reportingHosts": 1
+		addIntToStream("reportingHosts", cluster.second.get().prioritySet().hostSetsPerPriority().size(), cluster_info);
 
-		addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds", 30000, cluster_info);//
-		addStringToStream("name", cluster.second.get().info()->name(), cluster_info);//    "name": "PlaylistGet",
-		addIntToStream("currentLargestPoolSize", 30, cluster_info);//
-		addIntToStream("currentCorePoolSize", 30, cluster_info);//
-		addIntToStream("currentQueueSize", 0, cluster_info);//
-		addIntToStream("currentTaskCount", 5678, cluster_info);//
-		addIntToStream("rollingCountThreadsExecuted", 100, cluster_info);//
-		addIntToStream("currentMaximumPoolSize", 30, cluster_info);//
+		addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds", Stats::HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
+		addStringToStream("name", cluster.second.get().info()->name(), cluster_info);
+		addIntToStream("currentLargestPoolSize", 30, cluster_info);
+		addIntToStream("currentCorePoolSize", 30, cluster_info);
+		addIntToStream("currentQueueSize", 0, cluster_info);
+		addIntToStream("currentTaskCount", 5678, cluster_info);
+		addIntToStream("rollingCountThreadsExecuted", 100, cluster_info);
+		addIntToStream("currentMaximumPoolSize", 30, cluster_info);
 
 		cluster_info << "}" << std::endl << std::endl;
     ss << cluster_info.str();
@@ -533,68 +538,94 @@ void AdminImpl::addHystrixCommand(std::stringstream& ss) {
 		std::stringstream cluster_info;
 
 		std::string cluster_name = cluster.second.get().info()->name();
-//		std::cout << "cluster name: " << cluster_name << std::endl;
 
-		std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());	  //  data: {
-		addStringToStream("type", "HystrixCommand", cluster_info);//    "type": "HystrixCommand",
-		addStringToStream("name", cluster.second.get().info()->name(), cluster_info);//    "name": "PlaylistGet",
-		addStringToStream("group", "NA", cluster_info);		//    "group": "PlaylistGet",
-		addIntToStream("currentTime", now, cluster_info);//    "currentTime": 1355239617628,
-		addInfoToStream("isCircuitBreakerOpen", "false", cluster_info);//    "isCircuitBreakerOpen": false,
-		double errors = hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_5xx") +
-		    hystrix_stats_->getRollingValue("cluster." + cluster_name + ".retry.upstream_rq_5xx");
-		double timeouts = hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_timeout");
+		std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+		addStringToStream("type", "HystrixCommand", cluster_info);
+		addStringToStream("name", cluster.second.get().info()->name(), cluster_info);
+		addStringToStream("group", "NA", cluster_info);
+		addIntToStream("currentTime", now, cluster_info);
+		addInfoToStream("isCircuitBreakerOpen", "false", cluster_info);
+
+		// combining timeouts+retries - retries are counted  as separate requests
+		// (alternative: each request including the retries counted as 1)
+		double timeouts = hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_timeout")
+            + hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_per_try_timeout");
+
+		// combining errors+retry errors - retries are counted as separate requests
+		// (alternative: each request including the retries counted as 1)
+		// since timeouts are 504 (or 408), deduce them from here. timeout retries were not counted here anyway.
+		double errors = hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_5xx")
+		        + hystrix_stats_->getRollingValue("cluster." + cluster_name + ".retry.upstream_rq_5xx")
+		        + hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_4xx")
+		        + hystrix_stats_->getRollingValue("cluster." + cluster_name + ".retry.upstream_rq_4xx")
+		        - hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_timeout");
+
+
 		double total = hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_total");
+
 		double error_rate = total == 0 ? 0 : ((errors + timeouts)/total)*100;
-    std::cout << "total = " << total << "errors = " << errors << "error_rate = " << error_rate << std::endl;
-		addIntToStream("errorPercentage", error_rate , cluster_info);		//    "errorPercentage": 0,
-		addIntToStream("errorCount", errors, cluster_info);//    "errorCount": 0,
-		addIntToStream("requestCount", total, cluster_info);  //    "requestCount": 121,
-		addIntToStream("rollingCountCollapsedRequests", 0, cluster_info);		//    "rollingCountCollapsedRequests": 0,
-		addIntToStream("rollingCountExceptionsThrown", 0, cluster_info);		//    "rollingCountExceptionsThrown": 0,
-		addIntToStream("rollingCountFailure", errors, cluster_info);  //    "requestCount": 121,
-		addIntToStream("rollingCountFallbackFailure", 0, cluster_info);//    "rollingCountFallbackFailure": 0,
-		addIntToStream("rollingCountFallbackRejection", 0, cluster_info);//    "rollingCountFallbackRejection": 0,
-		addIntToStream("rollingCountFallbackSuccess", 0, cluster_info);//    "rollingCountFallbackSuccess": 0,
-		addIntToStream("rollingCountResponsesFromCache", 0, cluster_info);//    "rollingCountResponsesFromCache": 69,
-		addIntToStream("rollingCountSemaphoreRejected", 0, cluster_info);//    "rollingCountSemaphoreRejected": 0,
-		addIntToStream("rollingCountShortCircuited", hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_pending_overflow"), cluster_info);  //    "requestCount": 121,
-		addIntToStream("rollingCountSuccess", hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_2xx"), cluster_info);  //    "requestCount": 121,
-		addIntToStream("rollingCountThreadPoolRejected", 0, cluster_info);	//    "rollingCountThreadPoolRejected": 0,
-		addIntToStream("rollingCountTimeout", timeouts, cluster_info);  //    "requestCount": 121,
-		addIntToStream("rollingCountBadRequests", 0, cluster_info);	//    "rollingCountBadRequests": 0,
+    std::cout << "total = " << total << " errors = " << errors << " timeouts = " << timeouts << " error_rate = " << error_rate << std::endl;
+
+    addIntToStream("errorPercentage", error_rate , cluster_info);
+		addIntToStream("errorCount", errors, cluster_info);
+		addIntToStream("requestCount", total, cluster_info);
+		addIntToStream("rollingCountCollapsedRequests", 0, cluster_info);
+		addIntToStream("rollingCountExceptionsThrown", 0, cluster_info);
+		addIntToStream("rollingCountFailure", errors, cluster_info);
+		addIntToStream("rollingCountFallbackFailure", 0, cluster_info);
+		addIntToStream("rollingCountFallbackRejection", 0, cluster_info);
+		addIntToStream("rollingCountFallbackSuccess", 0, cluster_info);
+		addIntToStream("rollingCountResponsesFromCache", 0, cluster_info);
+
+		// Envoy's "circuit breaker" has similar meaning to hystrix's isolation
+		// so we count upstream_rq_pending_overflow and present it as rejected
+		addIntToStream("rollingCountSemaphoreRejected",
+		    hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_pending_overflow"),
+		    cluster_info);
+
+		// Hystrix's short circuit is not similar to Envoy's since it is trrigered by 503 responses
+		// there is no parallel counter in Envoy since as a result of errors (outlier detection)
+		// requests are not rejected, but rather the node is removed from load balancer healthy pool
+		addIntToStream("rollingCountShortCircuited", 0 , cluster_info);
+		addIntToStream("rollingCountSuccess",
+		    hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_2xx"),
+		    cluster_info);
+		addIntToStream("rollingCountThreadPoolRejected", 0, cluster_info);
+		addIntToStream("rollingCountTimeout", timeouts, cluster_info);
+		addIntToStream("rollingCountBadRequests", 0, cluster_info);
 		addIntToStream("currentConcurrentExecutionCount", 0, cluster_info);
 		addInfoToStream("latencyExecute_mean", "0", cluster_info);
 		addInfoToStream("latencyExecute",
-				"{\"0\":2,\"25\":4,\"50\":8,\"75\":11,\"90\":12,\"95\":45,\"99\":51,\"99.5\":51,\"100\":51}",
+		//		"{\"0\":2,\"25\":4,\"50\":8,\"75\":11,\"90\":12,\"95\":45,\"99\":51,\"99.5\":51,\"100\":51}",
+        "{\"0\":0,\"25\":0,\"50\":0,\"75\":0,\"90\":0,\"95\":0,\"99\":0,\"99.5\":0,\"100\":0}",
 				cluster_info);
 		addIntToStream("propertyValue_circuitBreakerRequestVolumeThreshold",
 				0
 				//				getOutlierSuccessRateRequestVolume(cluster.second.get().outlierDetector())
-				, cluster_info);	//    "propertyValue_circuitBreakerRequestVolumeThreshold": 20,
-		addIntToStream("propertyValue_circuitBreakerSleepWindowInMilliseconds", 0, cluster_info);	//    "propertyValue_circuitBreakerSleepWindowInMilliseconds": 20,
+				, cluster_info);
+		addIntToStream("propertyValue_circuitBreakerSleepWindowInMilliseconds", 0, cluster_info);
 		addIntToStream("propertyValue_circuitBreakerErrorThresholdPercentage",
 				//				getOutlierBaseEjectionTimeMs(cluster.second.get().outlierDetector())
 				0
 				, cluster_info);	//    "propertyValue_circuitBreakerErrorThresholdPercentage": 50,
-		addInfoToStream("propertyValue_circuitBreakerForceOpen", "false", cluster_info);//  "propertyValue_circuitBreakerForceOpen": false,
-		addInfoToStream("propertyValue_circuitBreakerForceClosed", "false", cluster_info);//  "propertyValue_circuitBreakerForceClosed": false,
-		// removed from hystrix(?)		addInfoToStream("propertyValue_circuitBreakerEnabled", "true", cluster_info);//    "propertyValue_circuitBreakerEnabled": true,
-		addStringToStream("propertyValue_executionIsolationStrategy", "THREAD", cluster_info);//    "propertyValue_executionIsolationStrategy": "THREAD",
+		addInfoToStream("propertyValue_circuitBreakerForceOpen", "false", cluster_info);
+		addInfoToStream("propertyValue_circuitBreakerForceClosed", "false", cluster_info);
+		// removed from hystrix(?)		addInfoToStream("propertyValue_circuitBreakerEnabled", "true", cluster_info);
+		addStringToStream("propertyValue_executionIsolationStrategy", "SEMAPHORE", cluster_info);
 		addIntToStream("propertyValue_executionIsolationThreadTimeoutInMilliseconds",
 				cluster.second.get().info()->connectTimeout().count(),
-				cluster_info);//    "propertyValue_executionIsolationThreadTimeoutInMilliseconds": 800,
-		addInfoToStream("propertyValue_executionIsolationThreadInterruptOnTimeout", "false", cluster_info);		//    "propertyValue_executionIsolationThreadInterruptOnTimeout": true,
+				cluster_info);
+		addInfoToStream("propertyValue_executionIsolationThreadInterruptOnTimeout", "false", cluster_info);
 		// removed from hystrix(?)				//    "propertyValue_executionIsolationThreadPoolKeyOverride": null,
 		addInfoToStream("propertyValue_executionIsolationSemaphoreMaxConcurrentRequests",
 				std::to_string(cluster.second.get().info()->resourceManager(Upstream::ResourcePriority::Default).pendingRequests().max())
-		, cluster_info);  //    "propertyValue_executionIsolationSemaphoreMaxConcurrentRequests": 20,
-		addIntToStream("propertyValue_fallbackIsolationSemaphoreMaxConcurrentRequests", 0, cluster_info);//    "propertyValue_fallbackIsolationSemaphoreMaxConcurrentRequests": 10,
-		addInfoToStream("propertyValue_requestCacheEnabled", "false", cluster_info);//    "propertyValue_requestCacheEnabled": true,
-		addInfoToStream("propertyValue_requestLogEnabled", "true", cluster_info);	//    "propertyValue_requestLogEnabled": true,
-		//addInfoToStream("reportingHosts", std::to_string(cluster.second.get().hosts().size()), cluster_info);//    "reportingHosts": 1
-		addIntToStream("reportingHosts", cluster.second.get().prioritySet().hostSetsPerPriority().size(), cluster_info);//    "reportingHosts": 1
-		addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds", 10000, cluster_info);  //    "propertyValue_metricsRollingStatisticalWindowInMilliseconds": 10000,
+		, cluster_info);
+		addIntToStream("propertyValue_fallbackIsolationSemaphoreMaxConcurrentRequests", 0, cluster_info);
+		addInfoToStream("propertyValue_requestCacheEnabled", "false", cluster_info);
+		addInfoToStream("propertyValue_requestLogEnabled", "true", cluster_info);
+		addIntToStream("reportingHosts", cluster.second.get().prioritySet().hostSetsPerPriority().size(), cluster_info);
+		addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds",
+		    Stats::HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
 
 		cluster_info << "}" << std::endl << std::endl;
     ss << cluster_info.str();
@@ -612,6 +643,11 @@ void AdminImpl::updateHystrixRollingWindow() {
     }
   }
 
+  // Can we access histogram data?
+//  Stats::Histogram& histogram = server_.stats().histogram("downstream_rq_time");
+//  std::cout << "name: " << histogram.name() << " print something: " <<
+//      buildTagStr(histogram.tags()) << std::endl;
+
   // I think there are no relevant gauges
   //  for (const Stats::GaugeSharedPtr& gauge : server_.stats().gauges()) {
   //    if (gauge->name().find("rq") != std::string::npos) {
@@ -624,15 +660,29 @@ void AdminImpl::updateHystrixRollingWindow() {
 
 }
 
+//const std::string AdminImpl::buildTagStr(const std::vector<Stats::Tag>& tags) {
+////  if (!use_tag_ || tags.empty()) {
+////    return "";
+////  }
+//
+//  std::vector<std::string> tag_strings;
+//  tag_strings.reserve(tags.size());
+//  for (const Stats::Tag& tag : tags) {
+//    tag_strings.emplace_back(tag.name_ + ":" + tag.value_);
+//  }
+//  return "|#" + StringUtil::join(tag_strings, ",");
+//}
+
+
 void AdminImpl::sendKeepAlivePing(Http::StreamDecoderFilterCallbacks* callbacks) {
-//  std::cout << "ping!" << std::endl;
   std::string pingMsg = ":\n\n";
   Buffer::OwnedImpl data;
   data.add(pingMsg);
+
+  // using write() since we are sending network level
   (const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
-  const auto ms = std::chrono::milliseconds(3000);
+  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS);
   hystrix_ping_timer_->enableTimer(ms);
-  //std::cout << "done AdminImpl::sendKeepAlivePing" << std::endl;
 
 }
 
@@ -643,16 +693,15 @@ void AdminImpl::prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* 
   addHystrixCommand(ss);
   addHystrixThreadPool(ss);
 
-//  std::cout << "hystrix message:" << std::endl;
-//  std::cout << ss.str() << std::endl;
   std::string dataMsg = ss.str();
   Buffer::OwnedImpl data;
   data.add(dataMsg);
+
+  // using write() since we are sending network level
   (const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
 
-  const auto ms = std::chrono::milliseconds(5000);
+  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS);
   hystrix_data_timer_->enableTimer(ms);
-//  std::cout << "done AdminImpl::prepareAndSendHystrixStream" << std::endl;
 }
 
 
@@ -715,7 +764,7 @@ AdminImpl::AdminImpl(const std::string& access_log_path, const std::string& prof
            false}},
       listener_stats_(
           Http::ConnectionManagerImpl::generateListenerStats("http.admin.", listener_scope)),
-       hystrix_stats_(new Stats::HystrixStats(10)) {
+       hystrix_stats_(new Stats::HystrixStats(Stats::HYSTRIX_NUM_OF_BUCKETS)) {
 
   if (!address_out_path.empty()) {
     std::ofstream address_out_file(address_out_path);
