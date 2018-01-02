@@ -15,7 +15,6 @@
 #include "envoy/ssl/context_manager.h"
 #include "envoy/stats/stats.h"
 #include "envoy/stats/stats_macros.h"
-#include "envoy/stats/hystrix_stats.h"
 #include "envoy/tracing/http_tracer.h"
 
 #include "common/access_log/access_log_manager_impl.h"
@@ -26,7 +25,6 @@
 #include "server/listener_manager_impl.h"
 #include "server/test_hooks.h"
 #include "server/worker_impl.h"
-//#include "common/stats/hystrix_stats_impl.h"
 
 
 namespace Envoy {
@@ -165,7 +163,6 @@ public:
   Tracing::HttpTracer& httpTracer() override;
   ThreadLocal::Instance& threadLocal() override { return thread_local_; }
   const LocalInfo::LocalInfo& localInfo() override { return *local_info_; }
-//  Stats::HystrixStats& hystrixStats() override { return *hystrix_stats_; }
 
 private:
   void flushStats();
@@ -174,8 +171,6 @@ private:
   void loadServerFlags(const Optional<std::string>& flags_path);
   uint64_t numConnections();
   void startWorkers();
-
-  void sendHystrixMessage();
 
   Options& options_;
   HotRestart& restarter_;
@@ -206,7 +201,6 @@ private:
   std::unique_ptr<Upstream::ClusterManagerFactory> cluster_manager_factory_;
   InitManagerImpl init_manager_;
   std::unique_ptr<Server::GuardDog> guard_dog_;
-//  std::unique_ptr<Stats::HystrixStatsImpl> hystrix_stats_;
 };
 
 } // Server

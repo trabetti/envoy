@@ -7,6 +7,7 @@
 #include "envoy/http/filter.h"
 #include "envoy/network/listen_socket.h"
 #include "envoy/server/admin.h"
+
 #include "envoy/server/instance.h"
 #include "envoy/upstream/outlier_detection.h"
 #include "envoy/upstream/resource_manager.h"
@@ -16,9 +17,9 @@
 #include "common/http/conn_manager_impl.h"
 #include "common/http/date_provider_impl.h"
 #include "common/http/utility.h"
+#include "common/stats/hystrix_stats.h"
 
 #include "server/config/network/http_connection_manager.h"
-#include "common/stats/hystrix_stats_impl.h"
 
 namespace Envoy {
 namespace Server {
@@ -122,8 +123,6 @@ private:
   static std::string formatTagsForPrometheus(const std::vector<Stats::Tag>& tags);
   static std::string prometheusMetricName(const std::string& extractedName);
 
-  std::string getOutlierSuccessRateRequestVolume(const Upstream::Outlier::Detector* outlier_detector);
-  std::string getOutlierBaseEjectionTimeMs(const Upstream::Outlier::Detector* outlier_detector);
   void addStringToStream(std::string key, std::string value, std::stringstream& info);
   void addIntToStream(std::string key, uint64_t value, std::stringstream& info);
   void addInfoToStream(std::string key, std::string value, std::stringstream& info);
@@ -163,8 +162,7 @@ private:
   Http::SlowDateProviderImpl date_provider_;
   std::vector<Http::ClientCertDetailsType> set_current_client_cert_details_;
   Http::ConnectionManagerListenerStats listener_stats_;
-  //Stats::HystrixStatsImpl& hystrix_stats_;
-  std::unique_ptr<Stats::HystrixStatsImpl> hystrix_stats_;
+  std::unique_ptr<Stats::HystrixStats> hystrix_stats_;
 
   Event::TimerPtr hystrix_data_timer_;
   Event::TimerPtr hystrix_ping_timer_;

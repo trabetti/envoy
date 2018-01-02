@@ -221,8 +221,6 @@ public:
   void addChangedStateCb(ChangeStateCb cb) override { callbacks_.push_back(cb); }
   double successRateAverage() const override { return success_rate_average_; }
   double successRateEjectionThreshold() const override { return success_rate_ejection_threshold_; }
-  uint64_t successRateRequestVolume() const override {return config_.successRateRequestVolume();}
-  uint64_t baseEjectionTimeMs() const override {return config_.baseEjectionTimeMs();}
 
 private:
   DetectorImpl(const Cluster& cluster, const envoy::api::v2::Cluster::OutlierDetection& config,

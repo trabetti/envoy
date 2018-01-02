@@ -30,6 +30,7 @@ public:
   const LowerCaseString ContentType{"content-type"};
   const LowerCaseString Cookie{"cookie"};
   const LowerCaseString Date{"date"};
+  const LowerCaseString CacheControl{"Cache-Control"};
   const LowerCaseString EnvoyDownstreamServiceCluster{"x-envoy-downstream-service-cluster"};
   const LowerCaseString EnvoyDownstreamServiceNode{"x-envoy-downstream-service-node"};
   const LowerCaseString EnvoyExternalAddress{"x-envoy-external-address"};
@@ -60,6 +61,7 @@ public:
   const LowerCaseString GrpcStatus{"grpc-status"};
   const LowerCaseString GrpcAcceptEncoding{"grpc-accept-encoding"};
   const LowerCaseString Host{":authority"};
+  const LowerCaseString NoChunks{":no-chunks"};
   const LowerCaseString HostLegacy{"host"};
   const LowerCaseString KeepAlive{"keep-alive"};
   const LowerCaseString Location{"location"};
@@ -94,6 +96,7 @@ public:
 
   struct {
     const std::string Text{"text/plain"};
+    const std::string TextEventStream{"text/event-stream"};
     const std::string Grpc{"application/grpc"};
     const std::string GrpcWeb{"application/grpc-web"};
     const std::string GrpcWebProto{"application/grpc-web+proto"};
@@ -162,6 +165,14 @@ public:
   struct {
     const std::string True{"true"};
   } CORSValues;
+
+  struct {
+    const std::string NoCache{"no-cache"};
+  } CacheControlValues;
+
+  struct {
+    const std::string AccessControlAllowHeadersHystrix{"Accept, Cache-Control, X-Requested-With, Last-Event-ID"};
+  } AccessControlAllowHeadersValue;
 };
 
 typedef ConstSingleton<HeaderValues> Headers;

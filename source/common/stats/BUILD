@@ -54,8 +54,7 @@ envoy_cc_library(
 )
 
 envoy_cc_library(
-    name = "hystrix_stats_impl_lib",
-    srcs = ["hystrix_stats_impl.cc"],
-    hdrs = ["hystrix_stats_impl.h"],
-    deps = ["//include/envoy/stats:hystrix_stats"],
+    name = "hystrix_stats_lib",
+    srcs = ["hystrix_stats.cc"],
+    hdrs = ["hystrix_stats.h"]
 )

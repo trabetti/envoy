@@ -231,7 +231,6 @@ envoy_cc_library(
         "//include/envoy/server:listener_manager_interface",
         "//include/envoy/server:options_interface",
         "//include/envoy/stats:stats_macros",
-         "//include/envoy/stats:hystrix_stats",
         "//include/envoy/tracing:http_tracer_interface",
         "//include/envoy/upstream:cluster_manager_interface",
         "//source/common/access_log:access_log_manager_lib",
@@ -249,7 +248,6 @@ envoy_cc_library(
         "//source/common/stats:thread_local_store_lib",
         "//source/common/upstream:cluster_manager_lib",
         "//source/server/http:admin_lib",
-        "//source/common/stats:hystrix_stats_impl_lib",
     ],
 )
 

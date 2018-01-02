@@ -157,12 +157,6 @@ void InstanceImpl::getParentStats(HotRestart::GetParentStatsInfo& info) {
   info.num_connections_ = numConnections();
 }
 
-void InstanceImpl::sendHystrixMessage() {
-    auto t = std::time(nullptr);
-    auto tm = *std::localtime(&t);
-	std::cout << "Hystrix timer: " <<  std::put_time(&tm, "%d-%m-%Y %H-%M-%S") << std::endl;
-}
-
 bool InstanceImpl::healthCheckFailed() { return server_stats_->live_.value() == 0; }
 
 void InstanceUtil::loadBootstrapConfig(envoy::api::v2::Bootstrap& bootstrap,
@@ -276,8 +270,6 @@ void InstanceImpl::initialize(Options& options,
   // started and before our own run() loop runs.
   guard_dog_.reset(
       new Server::GuardDogImpl(stats_store_, *config_, ProdMonotonicTimeSource::instance_));
-
-//  hystrix_stats_.reset(new Stats::HystrixStatsImpl(10));
 }
 
 void InstanceImpl::startWorkers() {

@@ -38,10 +38,13 @@ void StreamEncoderImpl::encodeHeader(const char* key, uint32_t key_size, const c
 
 void StreamEncoderImpl::encodeHeaders(const HeaderMap& headers, bool end_stream) {
   bool saw_content_length = false;
+  bool no_chunks = false;
   headers.iterate(
       [](const HeaderEntry& header, void* context) -> HeaderMap::Iterate {
+
         const char* key_to_use = header.key().c_str();
         uint32_t key_size_to_use = header.key().size();
+
         // Translate :authority -> host so that upper layers do not need to deal with this.
         if (key_size_to_use > 1 && key_to_use[0] == ':' && key_to_use[1] == 'a') {
           key_to_use = Headers::get().HostLegacy.get().c_str();
@@ -63,12 +66,16 @@ void StreamEncoderImpl::encodeHeaders(const HeaderMap& headers, bool end_stream)
     saw_content_length = true;
   }
 
+  if (headers.NoChunks()) {
+    no_chunks = true;
+  }
+
   ASSERT(!headers.TransferEncoding());
 
   // Assume we are chunk encoding unless we are passed a content length or this is a header only
   // response. Upper layers generally should strip transfer-encoding since it only applies to
   // HTTP/1.1. The codec will infer it based on the type of response.
-  if (saw_content_length) {
+  if (saw_content_length || no_chunks) {
     chunk_encoding_ = false;
   } else {
     if (end_stream) {
