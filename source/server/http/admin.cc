@@ -676,7 +676,6 @@ Http::Code AdminImpl::handlerAdminHome(const std::string&, Http::HeaderMap& resp
   response_headers.insertContentType().value().setReference(
       Http::Headers::get().ContentTypeValues.Html);
     
-
   // Prefix order is used during searching, but for printing do them in alpha order.
   std::map<std::string, const UrlHandler*> sorted_handlers;
   for (const UrlHandler& handler : handlers_) {

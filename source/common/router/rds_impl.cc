@@ -205,7 +205,7 @@ Router::RouteConfigProviderSharedPtr RouteConfigProviderManagerImpl::getRouteCon
   return new_provider;
 };
 
-Http::Code RouteConfigProviderManagerImpl::handlerRoutes(const std::string& url,
+Http::Code RouteConfigProviderManagerImpl::handlerRoutes(const std::string& url, Http::HeaderMap&,
                                                          Buffer::Instance& response,
 																												 Http::StreamDecoderFilterCallbacks* callbacks) {
   UNREFERENCED_PARAMETER(callbacks);

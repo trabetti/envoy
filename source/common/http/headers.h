@@ -24,6 +24,7 @@ public:
   const LowerCaseString AccessControlMaxAge{"access-control-max-age"};
   const LowerCaseString AccessControlAllowCredentials{"access-control-allow-credentials"};
   const LowerCaseString Authorization{"authorization"};
+  const LowerCaseString CacheControl{"cache-control"};
   const LowerCaseString ClientTraceId{"x-client-trace-id"};
   const LowerCaseString Connection{"connection"};
   const LowerCaseString ContentLength{"content-length"};
@@ -84,6 +85,7 @@ public:
   const LowerCaseString XB3ParentSpanId{"x-b3-parentspanid"};
   const LowerCaseString XB3Sampled{"x-b3-sampled"};
   const LowerCaseString XB3Flags{"x-b3-flags"};
+  const LowerCaseString XContentTypeOptions{"x-content-type-options"};
 
   struct {
     const std::string Close{"close"};
@@ -95,8 +97,15 @@ public:
   } UpgradeValues;
 
   struct {
+    const std::string NoCache{"no-cache"};
+    const std::string NoCacheMaxAge0{"no-cache, max-age=0"};
+  } CacheControlValues;
+
+  struct {
     const std::string Text{"text/plain"};
     const std::string TextEventStream{"text/event-stream"};
+    const std::string TextUtf8{"text/plain; charset=UTF-8"}; // TODO(jmarantz): fold this into Text
+    const std::string Html{"text/html; charset=UTF-8"};
     const std::string Grpc{"application/grpc"};
     const std::string GrpcWeb{"application/grpc-web"};
     const std::string GrpcWebProto{"application/grpc-web+proto"};
@@ -163,12 +172,12 @@ public:
   } TEValues;
 
   struct {
-    const std::string True{"true"};
-  } CORSValues;
+    const std::string Nosniff{"nosniff"};
+  } XContentTypeOptionValues;
 
   struct {
-    const std::string NoCache{"no-cache"};
-  } CacheControlValues;
+    const std::string True{"true"};
+  } CORSValues;
 
   struct {
     const std::string AccessControlAllowHeadersHystrix{"Accept, Cache-Control, X-Requested-With, Last-Event-ID"};

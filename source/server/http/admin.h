@@ -173,7 +173,6 @@ private:
   Http::Code handlerHystrixEventStream(const std::string& path_and_query, Buffer::Instance& response, 
   Http::StreamDecoderFilterCallbacks* callbacks);
 
-
   Server::Instance& server_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
   const std::string profile_path_;

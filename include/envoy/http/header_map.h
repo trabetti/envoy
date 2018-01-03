@@ -235,7 +235,7 @@ private:
   HEADER_FUNC(AccessControlExposeHeaders)                                                          \
   HEADER_FUNC(AccessControlMaxAge)                                                                 \
   HEADER_FUNC(Authorization)                                                                       \
-  HEADER_FUNC(NoChunks)                                                                       \
+  HEADER_FUNC(CacheControl)                                                                        \
   HEADER_FUNC(ClientTraceId)                                                                       \
   HEADER_FUNC(Connection)                                                                          \
   HEADER_FUNC(ContentLength)                                                                       \
@@ -271,6 +271,7 @@ private:
   HEADER_FUNC(Host)                                                                                \
   HEADER_FUNC(KeepAlive)                                                                           \
   HEADER_FUNC(Method)                                                                              \
+  HEADER_FUNC(NoChunks)                                                                       \
   HEADER_FUNC(Origin)                                                                              \
   HEADER_FUNC(OtSpanContext)                                                                       \
   HEADER_FUNC(Path)                                                                                \
