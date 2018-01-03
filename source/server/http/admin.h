@@ -7,7 +7,6 @@
 #include "envoy/http/filter.h"
 #include "envoy/network/listen_socket.h"
 #include "envoy/server/admin.h"
-
 #include "envoy/server/instance.h"
 #include "envoy/upstream/outlier_detection.h"
 #include "envoy/upstream/resource_manager.h"
@@ -37,7 +36,8 @@ public:
             const std::string& address_out_path, Network::Address::InstanceConstSharedPtr address,
             Server::Instance& server, Stats::Scope& listener_scope);
 
-  Http::Code runCallback(const std::string& path, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code runCallback(const std::string& path_and_query, Http::HeaderMap& response_headers,
+                         Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
   const Network::ListenSocket& socket() override { return *socket_; }
   Network::ListenSocket& mutable_socket() { return *socket_; }
 
@@ -135,19 +135,44 @@ private:
   /**
    * URL handlers.
    */
-  Http::Code handlerCerts(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerClusters(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerCpuProfiler(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerHealthcheckFail(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerHealthcheckOk(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerHotRestartVersion(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerLogging(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerResetCounters(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerServerInfo(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerStats(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerHystrixEventStream(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerQuitQuitQuit(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerListenerInfo(const std::string& url, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerAdminHome(const std::string& path_and_query, Http::HeaderMap& response_headers,
+                              Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerCerts(const std::string& path_and_query, Http::HeaderMap& response_headers,
+                          Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerClusters(const std::string& path_and_query, Http::HeaderMap& response_headers,
+                             Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerCpuProfiler(const std::string& path_and_query,
+                                Http::HeaderMap& response_headers, Buffer::Instance& response
+                                , Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerHealthcheckFail(const std::string& path_and_query,
+                                    Http::HeaderMap& response_headers, Buffer::Instance& response
+                                    , Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerHealthcheckOk(const std::string& path_and_query,
+                                  Http::HeaderMap& response_headers, Buffer::Instance& response
+                                  , Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerHelp(const std::string& path_and_query, Http::HeaderMap& response_headers,
+                         Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerHotRestartVersion(const std::string& path_and_query,
+                                      Http::HeaderMap& response_headers,
+                                      Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerListenerInfo(const std::string& path_and_query,
+                                 Http::HeaderMap& response_headers, Buffer::Instance& response
+                                 , Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerLogging(const std::string& path_and_query, Http::HeaderMap& response_headers,
+                            Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerMain(const std::string& path, Buffer::Instance& response, 
+  Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerQuitQuitQuit(const std::string& path_and_query,
+                                 Http::HeaderMap& response_headers, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerResetCounters(const std::string& path_and_query,
+                                  Http::HeaderMap& response_headers, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerServerInfo(const std::string& path_and_query, Http::HeaderMap& response_headers,
+                               Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerStats(const std::string& path_and_query, Http::HeaderMap& response_headers,
+                          Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+  Http::Code handlerHystrixEventStream(const std::string& path_and_query, Buffer::Instance& response, 
+  Http::StreamDecoderFilterCallbacks* callbacks);
+
 
   Server::Instance& server_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
@@ -179,7 +204,8 @@ public:
   void onDestroy() override {}
 
   // Http::StreamDecoderFilter
-  Http::FilterHeadersStatus decodeHeaders(Http::HeaderMap& headers, bool end_stream) override;
+  Http::FilterHeadersStatus decodeHeaders(Http::HeaderMap& response_headers,
+                                          bool end_stream) override;
   Http::FilterDataStatus decodeData(Buffer::Instance& data, bool end_stream) override;
   Http::FilterTrailersStatus decodeTrailers(Http::HeaderMap& trailers) override;
   void setDecoderFilterCallbacks(Http::StreamDecoderFilterCallbacks& callbacks) override {
