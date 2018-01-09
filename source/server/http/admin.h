@@ -80,6 +80,13 @@ public:
   const Http::TracingConnectionManagerConfig* tracingConfig() override { return nullptr; }
   Http::ConnectionManagerListenerStats& listenerStats() override { return listener_stats_; }
 
+  void disableHystrixTimers() {
+    if (hystrix_data_timer_)
+      hystrix_data_timer_->disableTimer();
+    if (hystrix_ping_timer_)
+      hystrix_ping_timer_->disableTimer();
+  }
+
 private:
   /**
    * Individual admin handler including prefix, help text, and callback.
@@ -202,7 +209,9 @@ public:
   AdminFilter(AdminImpl& parent);
 
   // Http::StreamFilterBase
-  void onDestroy() override {}
+  void onDestroy() override {
+    parent_.disableHystrixTimers();
+  }
 
   // Http::StreamDecoderFilter
   Http::FilterHeadersStatus decodeHeaders(Http::HeaderMap& response_headers,

@@ -513,7 +513,6 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::H
   Http::Code rc = Http::Code::OK;
   const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
 
-
 //  response_headers.insertContentType().value().setReference(
 //      Http::Headers::get().ContentTypeValues.TextEventStream);
 //  response_headers.insertCacheControl().value().setReference(
@@ -530,7 +529,7 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::H
 
   // sending our own OK since dashboard doesn't work with Nosniff header
   Http::HeaderMapPtr headers{
-    new Http::HeaderMapImpl{{Http::Headers::get().Status, std::to_string(enumToInt(rc))},//}};
+    new Http::HeaderMapImpl{{Http::Headers::get().Status, std::to_string(enumToInt(rc))},
       {Http::Headers::get().ContentType, Http::Headers::get().ContentTypeValues.TextEventStream},
       {Http::Headers::get().CacheControl, Http::Headers::get().CacheControlValues.NoCache},
       {Http::Headers::get().Connection, Http::Headers::get().ConnectionValues.Close},
@@ -545,16 +544,13 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::H
   hystrix_data_timer_ =
       callbacks->dispatcher().createTimer(
           [this,callbacks]() -> void { prepareAndSendHystrixStream(callbacks); });
-  //const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS);
   hystrix_data_timer_->enableTimer(
       std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS));
 
   // start ping
   hystrix_ping_timer_ =
       callbacks->dispatcher().createTimer(
-          [this,callbacks]() -> void {  sendKeepAlivePing(callbacks);
-  });
-  //const auto ms3 = std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS);
+          [this,callbacks]() -> void { sendKeepAlivePing(callbacks); });
   hystrix_ping_timer_->enableTimer(std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS));
 
   response.add("");
