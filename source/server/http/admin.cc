@@ -211,8 +211,7 @@ void AdminImpl::addCircuitSettings(const std::string& cluster_name, const std::s
 
 Http::Code AdminImpl::handlerClusters(const std::string&, Http::HeaderMap&,
                                       Buffer::Instance& response, 
-                                      Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                      Http::StreamDecoderFilterCallbacks*) {
   response.add(fmt::format("version_info::{}\n", server_.clusterManager().versionInfo()));
 
   for (auto& cluster : server_.clusterManager().clusters()) {
@@ -270,8 +269,7 @@ Http::Code AdminImpl::handlerClusters(const std::string&, Http::HeaderMap&,
 
 Http::Code AdminImpl::handlerCpuProfiler(const std::string& url, Http::HeaderMap&, 
                                          Buffer::Instance& response, 
-                                         Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                         Http::StreamDecoderFilterCallbacks*) {
   Http::Utility::QueryParams query_params = Http::Utility::parseQueryString(url);
   if (query_params.size() != 1 || query_params.begin()->first != "enable" ||
       (query_params.begin()->second != "y" && query_params.begin()->second != "n")) {
@@ -296,8 +294,7 @@ Http::Code AdminImpl::handlerCpuProfiler(const std::string& url, Http::HeaderMap
 
 Http::Code AdminImpl::handlerHealthcheckFail(const std::string&, Http::HeaderMap&,
                                              Buffer::Instance& response,
-    			                                   Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+    			                                   Http::StreamDecoderFilterCallbacks*) {
   server_.failHealthcheck(true);
   response.add("OK\n");
   return Http::Code::OK;
@@ -305,8 +302,7 @@ Http::Code AdminImpl::handlerHealthcheckFail(const std::string&, Http::HeaderMap
 
 Http::Code AdminImpl::handlerHealthcheckOk(const std::string&, Http::HeaderMap&,
                                            Buffer::Instance& response,
-                                           Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                           Http::StreamDecoderFilterCallbacks*) {
   server_.failHealthcheck(false);
   response.add("OK\n");
   return Http::Code::OK;
@@ -314,16 +310,14 @@ Http::Code AdminImpl::handlerHealthcheckOk(const std::string&, Http::HeaderMap&,
 
 Http::Code AdminImpl::handlerHotRestartVersion(const std::string&, Http::HeaderMap&,
                                                Buffer::Instance& response,
-                                               Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                               Http::StreamDecoderFilterCallbacks*) {
   response.add(server_.hotRestart().version());
   return Http::Code::OK;
 }
 
 Http::Code AdminImpl::handlerLogging(const std::string& url, Http::HeaderMap&,
                                      Buffer::Instance& response,
-                                     Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                     Http::StreamDecoderFilterCallbacks*) {
   Http::Utility::QueryParams query_params = Http::Utility::parseQueryString(url);
 
   Http::Code rc = Http::Code::OK;
@@ -350,8 +344,7 @@ Http::Code AdminImpl::handlerLogging(const std::string& url, Http::HeaderMap&,
 
 Http::Code AdminImpl::handlerResetCounters(const std::string&, Http::HeaderMap&,
                                            Buffer::Instance& response,
-                                           Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                           Http::StreamDecoderFilterCallbacks*) {
   for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
     counter->reset();
   }
@@ -362,8 +355,7 @@ Http::Code AdminImpl::handlerResetCounters(const std::string&, Http::HeaderMap&,
 
 Http::Code AdminImpl::handlerServerInfo(const std::string&,  Http::HeaderMap&,
                                         Buffer::Instance& response,
-                                        Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                        Http::StreamDecoderFilterCallbacks*) {
   time_t current_time = time(nullptr);
   response.add(fmt::format("envoy {} {} {} {} {}\n", VersionInfo::version(),
                            server_.healthCheckFailed() ? "draining" : "live",
@@ -375,8 +367,7 @@ Http::Code AdminImpl::handlerServerInfo(const std::string&,  Http::HeaderMap&,
 
 Http::Code AdminImpl::handlerStats(const std::string& url, Http::HeaderMap& response_headers,
                                    Buffer::Instance& response,
-                                   Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                   Http::StreamDecoderFilterCallbacks*) {
   // We currently don't support timers locally (only via statsd) so just group all the counters
   // and gauges together, alpha sort them, and spit them out.
   Http::Code rc = Http::Code::OK;
@@ -477,17 +468,15 @@ std::string AdminImpl::statsAsJson(const std::map<std::string, uint64_t>& all_st
 
 Http::Code AdminImpl::handlerQuitQuitQuit(const std::string&, Http::HeaderMap&,
                                           Buffer::Instance& response,
-                                          Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                          Http::StreamDecoderFilterCallbacks*) {
   server_.shutdown();
   response.add("OK\n");
   return Http::Code::OK;
 }
 
-Http::Code AdminImpl::handlerListenerInfo(const std::string&, Http::HeaderMap&,
+Http::Code AdminImpl::handlerListenerInfo(const std::string&, Http::HeaderMap& response_headers,
                                           Buffer::Instance& response,
-                                          Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                          Http::StreamDecoderFilterCallbacks*) {
   response_headers.insertContentType().value().setReference(
       Http::Headers::get().ContentTypeValues.Json);
   std::list<std::string> listeners;
@@ -500,8 +489,7 @@ Http::Code AdminImpl::handlerListenerInfo(const std::string&, Http::HeaderMap&,
 
 Http::Code AdminImpl::handlerCerts(const std::string&, Http::HeaderMap&,
                                    Buffer::Instance& response, 
-                                   Http::StreamDecoderFilterCallbacks* callbacks) {
-  UNREFERENCED_PARAMETER(callbacks);
+                                   Http::StreamDecoderFilterCallbacks*) {
   // This set is used to track distinct certificates. We may have multiple listeners, upstreams, etc
   // using the same cert.
   std::unordered_set<std::string> context_info_set;
@@ -519,7 +507,292 @@ Http::Code AdminImpl::handlerCerts(const std::string&, Http::HeaderMap&,
   return Http::Code::OK;
 }
 
+Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::HeaderMap& ,//response_headers,
+                                                Buffer::Instance& response,
+                                                Http::StreamDecoderFilterCallbacks* callbacks) {
+  Http::Code rc = Http::Code::OK;
+  const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
+
+
+//  response_headers.insertContentType().value().setReference(
+//      Http::Headers::get().ContentTypeValues.TextEventStream);
+//  response_headers.insertCacheControl().value().setReference(
+//      Http::Headers::get().CacheControlValues.NoCache);
+//  response_headers.insertConnection().value().setReference(
+//      Http::Headers::get().ConnectionValues.Close);
+//  response_headers.insertAccessControlAllowHeaders().value().setReference(
+//      Http::Headers::get().AccessControlAllowHeadersValue.AccessControlAllowHeadersHystrix);
+//  response_headers.insertAccessControlAllowOrigin().value().setReference(
+//      Http::Headers::get().AccessControlAllowOriginValue.All);
+//  response_headers.insertNoChunks().value().setReference(
+//      Http::Headers::get().AccessControlAllowOriginValue.All);
+
+
+  // sending our own OK since dashboard doesn't work with Nosniff header
+  Http::HeaderMapPtr headers{
+    new Http::HeaderMapImpl{{Http::Headers::get().Status, std::to_string(enumToInt(rc))},//}};
+      {Http::Headers::get().ContentType, Http::Headers::get().ContentTypeValues.TextEventStream},
+      {Http::Headers::get().CacheControl, Http::Headers::get().CacheControlValues.NoCache},
+      {Http::Headers::get().Connection, Http::Headers::get().ConnectionValues.Close},
+      {Http::Headers::get().AccessControlAllowHeaders, Http::Headers::get().AccessControlAllowHeadersValue.AccessControlAllowHeadersHystrix},
+      {Http::Headers::get().AccessControlAllowOrigin, "*"},
+      {Http::Headers::get().NoChunks, "0"} // parameter to encodeHeaders
+    }};
+
+  callbacks->encodeHeaders(std::move(headers), false);
+
+  // start streaming
+  hystrix_data_timer_ =
+      callbacks->dispatcher().createTimer(
+          [this,callbacks]() -> void { prepareAndSendHystrixStream(callbacks); });
+  //const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS);
+  hystrix_data_timer_->enableTimer(
+      std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS));
+
+  // start ping
+  hystrix_ping_timer_ =
+      callbacks->dispatcher().createTimer(
+          [this,callbacks]() -> void {  sendKeepAlivePing(callbacks);
+  });
+  //const auto ms3 = std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS);
+  hystrix_ping_timer_->enableTimer(std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS));
+
+  response.add("");
+  return rc;
+}
+
+// TODO: addStringToStream and addIntToStream should call addInfoToStream
+void AdminImpl::addStringToStream(std::string key, std::string value, std::stringstream& info) {
+	if (info.str().empty())
+		info << "data: {";
+	else
+		info << ", ";
+	info << "\"" + key + "\": \"" + value + "\"";
+}
+
+void AdminImpl::addIntToStream(std::string key, uint64_t value, std::stringstream& info) {
+	if (info.str().empty())
+		info << "data: {";
+	else
+		info << ", ";
+	info << "\"" + key + "\": " + std::to_string(value);
+}
+
+void AdminImpl::addInfoToStream(std::string key, std::string value, std::stringstream& info) {
+	if (info.str().empty())
+		info << "data: {";
+	else
+		info << ", ";
+	info << "\"" + key + "\": " + value;
+}
+
+void AdminImpl::addHystrixThreadPool(std::stringstream& ss) {
+	for (auto& cluster : server_.clusterManager().clusters()) {
+		std::stringstream cluster_info;
+
+		std::string cluster_name = cluster.second.get().info()->name();
+		//std::cout << "cluster name: " << cluster_name << std::endl;
+
+		addIntToStream("currentPoolSize", 0, cluster_info);
+		addIntToStream("rollingMaxActiveThreads", 0, cluster_info);
+		addIntToStream("currentActiveCount", 0, cluster_info);
+		addIntToStream("currentCompletedTaskCount", 0, cluster_info);
+		addIntToStream("propertyValue_queueSizeRejectionThreshold"
+				, cluster.second.get().info()->resourceManager(Upstream::ResourcePriority::Default).pendingRequests().max()
+				, cluster_info);
+		addStringToStream("type", "HystrixThreadPool", cluster_info);
+
+		addIntToStream("reportingHosts", cluster.second.get().prioritySet().hostSetsPerPriority().size(), cluster_info);
+
+		addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds", Stats::HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
+		addStringToStream("name", cluster.second.get().info()->name(), cluster_info);
+		addIntToStream("currentLargestPoolSize", 0, cluster_info);
+		addIntToStream("currentCorePoolSize", 0, cluster_info);
+		addIntToStream("currentQueueSize", 0, cluster_info);
+		addIntToStream("currentTaskCount", 0, cluster_info);
+		addIntToStream("rollingCountThreadsExecuted", 0, cluster_info);
+		addIntToStream("currentMaximumPoolSize", 0, cluster_info);
+
+		cluster_info << "}" << std::endl << std::endl;
+    ss << cluster_info.str();
+
+	}
+}
+
+void AdminImpl::addHystrixCommand(std::stringstream& ss) {
+	for (auto& cluster : server_.clusterManager().clusters()) {
+		std::stringstream cluster_info;
+
+		std::string cluster_name = cluster.second.get().info()->name();
+
+		std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+		addStringToStream("type", "HystrixCommand", cluster_info);
+		addStringToStream("name", cluster.second.get().info()->name(), cluster_info);
+		addStringToStream("group", "NA", cluster_info);
+		addIntToStream("currentTime", now, cluster_info);
+		addInfoToStream("isCircuitBreakerOpen", "false", cluster_info);
+
+		// combining timeouts+retries - retries are counted  as separate requests
+		// (alternative: each request including the retries counted as 1)
+		double timeouts = hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_timeout")
+            + hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_per_try_timeout");
+
+		// combining errors+retry errors - retries are counted as separate requests
+		// (alternative: each request including the retries counted as 1)
+		// since timeouts are 504 (or 408), deduce them from here. timeout retries were not counted here anyway.
+		double errors = hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_5xx")
+		        + hystrix_stats_->getRollingValue("cluster." + cluster_name + ".retry.upstream_rq_5xx")
+		        + hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_4xx")
+		        + hystrix_stats_->getRollingValue("cluster." + cluster_name + ".retry.upstream_rq_4xx")
+		        - hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_timeout");
+
+
+		double total = hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_total");
+
+		double error_rate = total == 0 ? 0 : ((errors + timeouts)/total)*100;
+    //std::cout << "total = " << total << " errors = " << errors << " timeouts = " << timeouts << " error_rate = " << error_rate << std::endl;
+
+    addIntToStream("errorPercentage", error_rate , cluster_info);
+		addIntToStream("errorCount", errors, cluster_info);
+		addIntToStream("requestCount", total, cluster_info);
+		addIntToStream("rollingCountCollapsedRequests", 0, cluster_info);
+		addIntToStream("rollingCountExceptionsThrown", 0, cluster_info);
+		addIntToStream("rollingCountFailure", errors, cluster_info);
+		addIntToStream("rollingCountFallbackFailure", 0, cluster_info);
+		addIntToStream("rollingCountFallbackRejection", 0, cluster_info);
+		addIntToStream("rollingCountFallbackSuccess", 0, cluster_info);
+		addIntToStream("rollingCountResponsesFromCache", 0, cluster_info);
+
+		// Envoy's "circuit breaker" has similar meaning to hystrix's isolation
+		// so we count upstream_rq_pending_overflow and present it as rejected
+		addIntToStream("rollingCountSemaphoreRejected",
+		    hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_pending_overflow"),
+		    cluster_info);
+
+		// Hystrix's short circuit is not similar to Envoy's since it is trrigered by 503 responses
+		// there is no parallel counter in Envoy since as a result of errors (outlier detection)
+		// requests are not rejected, but rather the node is removed from load balancer healthy pool
+		addIntToStream("rollingCountShortCircuited", 0 , cluster_info);
+		addIntToStream("rollingCountSuccess",
+		    hystrix_stats_->getRollingValue("cluster." + cluster_name + ".upstream_rq_2xx"),
+		    cluster_info);
+		addIntToStream("rollingCountThreadPoolRejected", 0, cluster_info);
+		addIntToStream("rollingCountTimeout", timeouts, cluster_info);
+		addIntToStream("rollingCountBadRequests", 0, cluster_info);
+		addIntToStream("currentConcurrentExecutionCount", 0, cluster_info);
+		addInfoToStream("latencyExecute_mean", "0", cluster_info);
+		addInfoToStream("latencyExecute",
+		//		"{\"0\":2,\"25\":4,\"50\":8,\"75\":11,\"90\":12,\"95\":45,\"99\":51,\"99.5\":51,\"100\":51}",
+        "{\"0\":0,\"25\":0,\"50\":0,\"75\":0,\"90\":0,\"95\":0,\"99\":0,\"99.5\":0,\"100\":0}",
+				cluster_info);
+		addIntToStream("propertyValue_circuitBreakerRequestVolumeThreshold",
+				0
+				//				getOutlierSuccessRateRequestVolume(cluster.second.get().outlierDetector())
+				, cluster_info);
+		addIntToStream("propertyValue_circuitBreakerSleepWindowInMilliseconds", 0, cluster_info);
+		addIntToStream("propertyValue_circuitBreakerErrorThresholdPercentage",
+				//				getOutlierBaseEjectionTimeMs(cluster.second.get().outlierDetector())
+				0
+				, cluster_info);	//    "propertyValue_circuitBreakerErrorThresholdPercentage": 50,
+		addInfoToStream("propertyValue_circuitBreakerForceOpen", "false", cluster_info);
+		addInfoToStream("propertyValue_circuitBreakerForceClosed", "true", cluster_info);
+		// removed from hystrix(?)		addInfoToStream("propertyValue_circuitBreakerEnabled", "true", cluster_info);
+		addStringToStream("propertyValue_executionIsolationStrategy", "SEMAPHORE", cluster_info);
+		addIntToStream("propertyValue_executionIsolationThreadTimeoutInMilliseconds",
+				cluster.second.get().info()->connectTimeout().count(),
+				cluster_info);
+		addInfoToStream("propertyValue_executionIsolationThreadInterruptOnTimeout", "false", cluster_info);
+		// removed from hystrix(?)				//    "propertyValue_executionIsolationThreadPoolKeyOverride": null,
+		addInfoToStream("propertyValue_executionIsolationSemaphoreMaxConcurrentRequests",
+				std::to_string(cluster.second.get().info()->resourceManager(Upstream::ResourcePriority::Default).pendingRequests().max())
+		, cluster_info);
+		addIntToStream("propertyValue_fallbackIsolationSemaphoreMaxConcurrentRequests", 0, cluster_info);
+		addInfoToStream("propertyValue_requestCacheEnabled", "false", cluster_info);
+		addInfoToStream("propertyValue_requestLogEnabled", "true", cluster_info);
+		addIntToStream("reportingHosts", cluster.second.get().prioritySet().hostSetsPerPriority().size(), cluster_info);
+		addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds",
+		    Stats::HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
+
+		cluster_info << "}" << std::endl << std::endl;
+    ss << cluster_info.str();
+	}
+
+}
+
+void AdminImpl::updateHystrixRollingWindow() {
+  hystrix_stats_->incCounter();
+
+  for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
+    if (counter->name().find("upstream_rq_") != std::string::npos) {
+      //std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
+      hystrix_stats_->pushNewValue(counter->name(), counter->value());
+    }
+  }
+
+  // Can we access histogram data?
+//  Stats::Histogram& histogram = server_.stats().histogram("downstream_rq_time");
+//  std::cout << "name: " << histogram.name() << " print something: " <<
+//      buildTagStr(histogram.tags()) << std::endl;
+
+  // I think there are no relevant gauges
+  //  for (const Stats::GaugeSharedPtr& gauge : server_.stats().gauges()) {
+  //    if (gauge->name().find("rq") != std::string::npos) {
+  //      std::cout << "gauge name: " << gauge->name() << ", gauge value: " << gauge->value() << std::endl;
+  //    hystrix_stats_->pushNewValue(gauge->name(), gauge->value());
+  //    }
+  //  }
+
+//  std::cout << "done reading counters" << std::endl;
+
+}
+
+//const std::string AdminImpl::buildTagStr(const std::vector<Stats::Tag>& tags) {
+////  if (!use_tag_ || tags.empty()) {
+////    return "";
+////  }
+//
+//  std::vector<std::string> tag_strings;
+//  tag_strings.reserve(tags.size());
+//  for (const Stats::Tag& tag : tags) {
+//    tag_strings.emplace_back(tag.name_ + ":" + tag.value_);
+//  }
+//  return "|#" + StringUtil::join(tag_strings, ",");
+//}
+
+
+void AdminImpl::sendKeepAlivePing(Http::StreamDecoderFilterCallbacks* callbacks) {
+  std::string pingMsg = ":\n\n";
+  Buffer::OwnedImpl data;
+  data.add(pingMsg);
+
+  // using write() since we are sending network level
+  (const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
+  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS);
+  hystrix_ping_timer_->enableTimer(ms);
+
+}
+
+void AdminImpl::prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* callbacks) {
+  updateHystrixRollingWindow();
+
+  std::stringstream ss;
+  addHystrixCommand(ss);
+  addHystrixThreadPool(ss);
+
+  std::string dataMsg = ss.str();
+  Buffer::OwnedImpl data;
+  data.add(dataMsg);
+
+  // using write() since we are sending network level
+  (const_cast<Network::Connection*>((callbacks)->connection()))->write(data);
+
+  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS);
+  hystrix_data_timer_->enableTimer(ms);
+}
+
+
 void AdminFilter::onComplete() {
+  bool end_stream = true;
   std::string path = request_headers_->Path()->value().c_str();
   ENVOY_STREAM_LOG(debug, "request complete: path: {}", *callbacks_, path);
 
@@ -528,8 +801,8 @@ void AdminFilter::onComplete() {
   Http::Code code = parent_.runCallback(path, *header_map, response, callbacks_);
 
   // more elegant way?
-  // alternative: add internal code to Http::Code that will be interpreted here as sending no response
   if (path.find("/hystrix_event_stream") != std::string::npos) {
+    //end_stream = false;;
     return;
   }
   header_map->insertStatus().value(std::to_string(enumToInt(code)));
@@ -546,7 +819,7 @@ void AdminFilter::onComplete() {
 
   // Under no circumstance should browsers sniff content-type.
   header_map->addReference(headers.XContentTypeOptions, headers.XContentTypeOptionValues.Nosniff);
-  callbacks_->encodeHeaders(std::move(header_map), response.length() == 0);
+  callbacks_->encodeHeaders(std::move(header_map), end_stream && response.length() == 0);
 
   if (response.length() > 0) {
     callbacks_->encodeData(response, true);
@@ -585,10 +858,13 @@ AdminImpl::AdminImpl(const std::string& access_log_path, const std::string& prof
           {"/server_info", "print server version/status information",
            MAKE_ADMIN_HANDLER(handlerServerInfo), false},
           {"/stats", "print server stats", MAKE_ADMIN_HANDLER(handlerStats), false},
+          {"/hystrix_event_stream", "send hystrix event stream",
+           MAKE_ADMIN_HANDLER(handlerHystrixEventStream), false},
           {"/listeners", "print listener addresses", MAKE_ADMIN_HANDLER(handlerListenerInfo),
            false}},
       listener_stats_(
-          Http::ConnectionManagerImpl::generateListenerStats("http.admin.", listener_scope)) {
+          Http::ConnectionManagerImpl::generateListenerStats("http.admin.", listener_scope)) ,
+       hystrix_stats_(new Stats::HystrixStats(Stats::HYSTRIX_NUM_OF_BUCKETS)) {
 
   if (!address_out_path.empty()) {
     std::ofstream address_out_file(address_out_path);
@@ -646,7 +922,7 @@ Http::Code AdminImpl::runCallback(const std::string& path_and_query,
     // Extra space is emitted below to have "invalid path." be a separate sentence in the
     // 404 output from "admin commands are:" in handlerHelp.
     response.add("invalid path. ");
-    handlerHelp(path_and_query, response_headers, response);
+    handlerHelp(path_and_query, response_headers, response, callbacks);
     code = Http::Code::NotFound;
   }
 
@@ -655,7 +931,7 @@ Http::Code AdminImpl::runCallback(const std::string& path_and_query,
 
 Http::Code AdminImpl::handlerHelp(const std::string&, Http::HeaderMap&,
                                   Buffer::Instance& response, 
-                                  ) {
+                                  Http::StreamDecoderFilterCallbacks*) {
   response.add("admin commands are:\n");
 
   // Prefix order is used during searching, but for printing do them in alpha order.
@@ -672,7 +948,7 @@ Http::Code AdminImpl::handlerHelp(const std::string&, Http::HeaderMap&,
 
 Http::Code AdminImpl::handlerAdminHome(const std::string&, Http::HeaderMap& response_headers,
                                        Buffer::Instance& response,
-                                       Http::StreamDecoderFilterCallbacks* callbacks) {
+                                       Http::StreamDecoderFilterCallbacks*) {
   response_headers.insertContentType().value().setReference(
       Http::Headers::get().ContentTypeValues.Html);
     

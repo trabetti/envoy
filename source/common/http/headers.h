@@ -24,7 +24,6 @@ public:
   const LowerCaseString AccessControlMaxAge{"access-control-max-age"};
   const LowerCaseString AccessControlAllowCredentials{"access-control-allow-credentials"};
   const LowerCaseString Authorization{"authorization"};
-  const LowerCaseString CacheControl{"cache-control"};
   const LowerCaseString ClientTraceId{"x-client-trace-id"};
   const LowerCaseString Connection{"connection"};
   const LowerCaseString ContentLength{"content-length"};
@@ -182,6 +181,10 @@ public:
   struct {
     const std::string AccessControlAllowHeadersHystrix{"Accept, Cache-Control, X-Requested-With, Last-Event-ID"};
   } AccessControlAllowHeadersValue;
+
+  struct {
+    const std::string All{"*"};
+  } AccessControlAllowOriginValue;
 };
 
 typedef ConstSingleton<HeaderValues> Headers;

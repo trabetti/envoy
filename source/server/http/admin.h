@@ -136,42 +136,44 @@ private:
    * URL handlers.
    */
   Http::Code handlerAdminHome(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                              Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+                              Buffer::Instance& response, Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerCerts(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                          Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+                          Buffer::Instance& response, Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerClusters(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                             Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+                             Buffer::Instance& response, Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerCpuProfiler(const std::string& path_and_query,
-                                Http::HeaderMap& response_headers, Buffer::Instance& response
-                                , Http::StreamDecoderFilterCallbacks* callbacks);
+                                Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerHealthcheckFail(const std::string& path_and_query,
-                                    Http::HeaderMap& response_headers, Buffer::Instance& response
-                                    , Http::StreamDecoderFilterCallbacks* callbacks);
+                                    Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                    Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerHealthcheckOk(const std::string& path_and_query,
-                                  Http::HeaderMap& response_headers, Buffer::Instance& response
-                                  , Http::StreamDecoderFilterCallbacks* callbacks);
+                                  Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                  Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerHelp(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                         Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+                         Buffer::Instance& response, Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerHotRestartVersion(const std::string& path_and_query,
                                       Http::HeaderMap& response_headers,
-                                      Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+                                      Buffer::Instance& response, Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerListenerInfo(const std::string& path_and_query,
-                                 Http::HeaderMap& response_headers, Buffer::Instance& response
-                                 , Http::StreamDecoderFilterCallbacks* callbacks);
+                                 Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                 Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerLogging(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                            Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+                            Buffer::Instance& response, Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerMain(const std::string& path, Buffer::Instance& response, 
-  Http::StreamDecoderFilterCallbacks* callbacks);
+                         Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerQuitQuitQuit(const std::string& path_and_query,
-                                 Http::HeaderMap& response_headers, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+                                 Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                 Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerResetCounters(const std::string& path_and_query,
-                                  Http::HeaderMap& response_headers, Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+                                  Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                  Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerServerInfo(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                               Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
+                               Buffer::Instance& response, Http::StreamDecoderFilterCallbacks*);
   Http::Code handlerStats(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                          Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
-  Http::Code handlerHystrixEventStream(const std::string& path_and_query, Buffer::Instance& response, 
-  Http::StreamDecoderFilterCallbacks* callbacks);
+                          Buffer::Instance& response, Http::StreamDecoderFilterCallbacks*);
+  Http::Code handlerHystrixEventStream(const std::string& path_and_query, Http::HeaderMap& response_headers,
+                                       Buffer::Instance& response, Http::StreamDecoderFilterCallbacks* callbacks);
 
   Server::Instance& server_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
