@@ -1,12 +1,11 @@
 #include <vector>
 #include <map>
 
-#include "envoy/event/timer.h"
-
 namespace Envoy {
 namespace Stats {
 
-typedef std::vector<int> RollingStats;
+typedef std::vector<uint64_t> RollingStats;
+typedef std::map<std::string, RollingStats> RollingStatsMap;
 
 // May want to make this configurable via config file
 static const uint64_t  HYSTRIX_NUM_OF_BUCKETS = 10;
@@ -29,9 +28,6 @@ public:
 	void printRollingWindow();
 	void resetRollingWindow();
 
-  Event::TimerPtr hystrix_data_timer_;
-  Event::TimerPtr hystrix_ping_timer_;
-
   void addStringToStream(std::string key, std::string value, std::stringstream& info);
   void addIntToStream(std::string key, uint64_t value, std::stringstream& info);
   void addInfoToStream(std::string key, std::string value, std::stringstream& info);
@@ -43,7 +39,7 @@ public:
   uint64_t queue_size, uint64_t reporting_hosts);
 
 private:
-	std::map<std::string, RollingStats> rolling_stats_;
+  RollingStatsMap rolling_stats_map_;
 	int current_index_;
 	int num_of_buckets_;
 

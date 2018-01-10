@@ -56,8 +56,5 @@ envoy_cc_library(
 envoy_cc_library(
     name = "hystrix_stats_lib",
     srcs = ["hystrix_stats.cc"],
-    hdrs = ["hystrix_stats.h"],
-    deps = [
-        "//include/envoy/event:timer_interface",
-    ],
- )
+    hdrs = ["hystrix_stats.h"]
+)

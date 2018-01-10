@@ -527,21 +527,17 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::H
   callbacks->encodeHeaders(std::move(headers), false);
 
   // start streaming
-  //hystrix_stats_->
   hystrix_data_timer_ =
       callbacks->dispatcher().createTimer(
           [this,callbacks]() -> void { prepareAndSendHystrixStream(callbacks); });
-  //hystrix_stats_->
   hystrix_data_timer_->enableTimer(
       std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS));
 
   // start ping
-  //hystrix_stats_->
   hystrix_ping_timer_ =
       callbacks->dispatcher().createTimer(
           [this,callbacks]() -> void { sendKeepAlivePing(callbacks); });
 
-  //hystrix_stats_->
   hystrix_ping_timer_->enableTimer(std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS));
 
   response.add("");

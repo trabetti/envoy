@@ -21,32 +21,32 @@ HystrixStats::HystrixStats(int num_of_buckets) {
 // add new value to rolling window, in place of oldest one
 void HystrixStats::pushNewValue(std::string key, int value){
   // create vector if do not exist
-  if (rolling_stats_.find(key) == rolling_stats_.end()) {
-    rolling_stats_[key].resize(num_of_buckets_,0);
+  if (rolling_stats_map_.find(key) == rolling_stats_map_.end()) {
+    rolling_stats_map_[key].resize(num_of_buckets_,0);
   }
-  rolling_stats_[key][current_index_] = value;
+  rolling_stats_map_[key][current_index_] = value;
 }
 
 int HystrixStats::getRollingValue(std::string cluster_name, std::string stats) {
   std::string key = "cluster." + cluster_name + "." + stats;
-  if (rolling_stats_.find(key) != rolling_stats_.end())
+  if (rolling_stats_map_.find(key) != rolling_stats_map_.end())
     // TODO: counter may be reset during action
-    return rolling_stats_[key][current_index_]-
-        rolling_stats_[key][(current_index_+1)%num_of_buckets_];
+    return rolling_stats_map_[key][current_index_]-
+        rolling_stats_map_[key][(current_index_+1)%num_of_buckets_];
   else
     return 0;
 }
 
 void HystrixStats::updateNumOfBuckets(int new_num_of_buckets) {
   // TODO: move data - especially if new size is smaller than original size
-  for (std::map<std::string, RollingStats>::iterator it=rolling_stats_.begin(); it!=rolling_stats_.end(); ++it) {
+  for (std::map<std::string, RollingStats>::iterator it=rolling_stats_map_.begin(); it!=rolling_stats_map_.end(); ++it) {
     it->second.resize(new_num_of_buckets);
   }
   num_of_buckets_ = new_num_of_buckets;
 }
 
 void HystrixStats::printRollingWindow() {
-  for (std::map<std::string, RollingStats>::iterator it=rolling_stats_.begin(); it!=rolling_stats_.end(); ++it) {
+  for (RollingStatsMap::iterator it=rolling_stats_map_.begin(); it!=rolling_stats_map_.end(); ++it) {
     std::cout << it->first<< " | ";
     RollingStats rollingStats = it->second;
     for (int i=0; i< num_of_buckets_; i++) {
@@ -58,14 +58,21 @@ void HystrixStats::printRollingWindow() {
 
 
 void HystrixStats::resetRollingWindow() {
-  for (std::map<std::string, RollingStats>::iterator it=rolling_stats_.begin(); it!=rolling_stats_.end(); ++it) {
-    RollingStats rollingStats = it->second;
-    //     rollingStats.clear();
-
-    for (int i=0; i< num_of_buckets_; i++) {
-      rollingStats[i] = 0;
-    }
-  }
+  std::cout << "window before: " << std::endl;
+  printRollingWindow();
+  rolling_stats_map_.clear();
+//  for (RollingStatsMap::iterator it=rolling_stats_map_.begin(); it!=rolling_stats_map_.end(); ++it) {
+//    std::string key = it->first;
+//    std::cout << "clearing stats: " << it->first << std::endl;
+//    //printRollingWindow();
+//         rolling_stats_map_[key].clear();
+//
+////    for (int i=0; i< num_of_buckets_; i++) {
+////      rolling_stats_map_[key][i] = 0;
+////    }
+//  }
+  std::cout << "window after: " << std::endl;
+  printRollingWindow();
 }
 
 // TODO: addStringToStream and addIntToStream should call addInfoToStream

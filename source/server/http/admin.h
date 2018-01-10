@@ -80,11 +80,16 @@ public:
   const Http::TracingConnectionManagerConfig* tracingConfig() override { return nullptr; }
   Http::ConnectionManagerListenerStats& listenerStats() override { return listener_stats_; }
 
+  // I left the two functions below in .h since anyway the functionality will move to the admin filter
   void disableHystrixTimers() {
     if (hystrix_data_timer_)
       hystrix_data_timer_->disableTimer();
     if (hystrix_ping_timer_)
       hystrix_ping_timer_->disableTimer();
+  }
+
+  void resetHystrixRollingWindow() {
+    hystrix_stats_->resetRollingWindow();
   }
 
 private:
@@ -206,6 +211,7 @@ public:
   // Http::StreamFilterBase
   void onDestroy() override {
     parent_.disableHystrixTimers();
+    parent_.resetHystrixRollingWindow();
   }
 
   // Http::StreamDecoderFilter
