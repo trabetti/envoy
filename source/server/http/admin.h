@@ -130,11 +130,6 @@ private:
   static std::string formatTagsForPrometheus(const std::vector<Stats::Tag>& tags);
   static std::string prometheusMetricName(const std::string& extractedName);
 
-  void addStringToStream(std::string key, std::string value, std::stringstream& info);
-  void addIntToStream(std::string key, uint64_t value, std::stringstream& info);
-  void addInfoToStream(std::string key, std::string value, std::stringstream& info);
-  void addHystrixThreadPool(std::stringstream& ss);
-  void addHystrixCommand(std::stringstream& ss);
   void updateHystrixRollingWindow();
   void prepareAndSendHystrixStream(Http::StreamDecoderFilterCallbacks* callbacks);
   void sendKeepAlivePing(Http::StreamDecoderFilterCallbacks* callbacks);
