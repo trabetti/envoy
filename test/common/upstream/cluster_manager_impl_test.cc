@@ -478,9 +478,9 @@ TEST_F(ClusterManagerImplTest, TcpHealthChecker) {
   )EOF";
 
   Network::MockClientConnection* connection = new NiceMock<Network::MockClientConnection>();
-  EXPECT_CALL(
-      factory_.dispatcher_,
-      createClientConnection_(PointeesEq(Network::Utility::resolveUrl("tcp://127.0.0.1:11001")), _))
+  EXPECT_CALL(factory_.dispatcher_,
+              createClientConnection_(
+                  PointeesEq(Network::Utility::resolveUrl("tcp://127.0.0.1:11001")), _, _))
       .WillOnce(Return(connection));
   create(parseBootstrapFromJson(json));
   factory_.tls_.shutdownThread();
@@ -509,9 +509,9 @@ TEST_F(ClusterManagerImplTest, HttpHealthChecker) {
   )EOF";
 
   Network::MockClientConnection* connection = new NiceMock<Network::MockClientConnection>();
-  EXPECT_CALL(
-      factory_.dispatcher_,
-      createClientConnection_(PointeesEq(Network::Utility::resolveUrl("tcp://127.0.0.1:11001")), _))
+  EXPECT_CALL(factory_.dispatcher_,
+              createClientConnection_(
+                  PointeesEq(Network::Utility::resolveUrl("tcp://127.0.0.1:11001")), _, _))
       .WillOnce(Return(connection));
   create(parseBootstrapFromJson(json));
   factory_.tls_.shutdownThread();
@@ -551,7 +551,7 @@ TEST_F(ClusterManagerImplTest, VerifyBufferLimits) {
   create(parseBootstrapFromJson(json));
   Network::MockClientConnection* connection = new NiceMock<Network::MockClientConnection>();
   EXPECT_CALL(*connection, setBufferLimits(8192));
-  EXPECT_CALL(factory_.tls_.dispatcher_, createClientConnection_(_, _))
+  EXPECT_CALL(factory_.tls_.dispatcher_, createClientConnection_(_, _, _))
       .WillOnce(Return(connection));
   auto conn_data = cluster_manager_->tcpConnForCluster("cluster_1", nullptr);
   EXPECT_EQ(connection, conn_data.connection_.get());
@@ -854,7 +854,7 @@ TEST_F(ClusterManagerImplTest, CloseConnectionsOnHealthFailure) {
   outlier_detector.runCallbacks(test_host);
   health_checker.runCallbacks(test_host, false);
 
-  EXPECT_CALL(*cp1, closeConnections());
+  EXPECT_CALL(*cp1, drainConnections());
   test_host->healthFlagSet(Host::HealthFlag::FAILED_OUTLIER_CHECK);
   outlier_detector.runCallbacks(test_host);
 
@@ -862,8 +862,8 @@ TEST_F(ClusterManagerImplTest, CloseConnectionsOnHealthFailure) {
   EXPECT_CALL(factory_, allocateConnPool_(_)).WillOnce(Return(cp2));
   cluster_manager_->httpConnPoolForCluster("some_cluster", ResourcePriority::High, nullptr);
 
-  EXPECT_CALL(*cp1, closeConnections());
-  EXPECT_CALL(*cp2, closeConnections());
+  EXPECT_CALL(*cp1, drainConnections());
+  EXPECT_CALL(*cp2, drainConnections());
   test_host->healthFlagSet(Host::HealthFlag::FAILED_ACTIVE_HC);
   health_checker.runCallbacks(test_host, true);
 
