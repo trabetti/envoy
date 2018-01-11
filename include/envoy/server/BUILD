@@ -26,6 +26,7 @@ envoy_cc_library(
         "//include/envoy/http:codes_interface",
         "//include/envoy/http:filter_interface",
         "//include/envoy/network:listen_socket_interface",
+        "//source/common/stats:hystrix_stats_lib",
     ],
 )
 

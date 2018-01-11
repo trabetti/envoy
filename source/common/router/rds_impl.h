@@ -174,7 +174,7 @@ private:
    */
   Http::Code handlerRoutes(const std::string& path_and_query, Http::HeaderMap& response_headers,
                            Buffer::Instance& response,
-                           Http::StreamDecoderFilterCallbacks* callbacks);
+						   Server::FilterData* filter_data);
 
   /**
    * Helper function used by handlerRoutes. The function loops through the providers
