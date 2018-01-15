@@ -174,12 +174,12 @@ public:
   DetectorConfig(const envoy::api::v2::Cluster::OutlierDetection& config);
 
   uint64_t intervalMs() { return interval_ms_; }
-  uint64_t baseEjectionTimeMs() const { return base_ejection_time_ms_; }
+  uint64_t baseEjectionTimeMs() { return base_ejection_time_ms_; }
   uint64_t consecutive5xx() { return consecutive_5xx_; }
   uint64_t consecutiveGatewayFailure() { return consecutive_gateway_failure_; }
   uint64_t maxEjectionPercent() { return max_ejection_percent_; }
   uint64_t successRateMinimumHosts() { return success_rate_minimum_hosts_; }
-  uint64_t successRateRequestVolume() const { return success_rate_request_volume_; }
+  uint64_t successRateRequestVolume() { return success_rate_request_volume_; }
   uint64_t successRateStdevFactor() { return success_rate_stdev_factor_; }
   uint64_t enforcingConsecutive5xx() { return enforcing_consecutive_5xx_; }
   uint64_t enforcingConsecutiveGatewayFailure() { return enforcing_consecutive_gateway_failure_; }

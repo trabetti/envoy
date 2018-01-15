@@ -119,10 +119,6 @@ private:
 
   std::vector<const UrlHandler*> sortedHandlers() const;
 
-  void updateHystrixRollingWindow(HystrixData* hystrix_data);
-  void prepareAndSendHystrixStream(HystrixData* hystrix_data);
-  void sendKeepAlivePing(HystrixData* hystrix_data);
-//  const std::string buildTagStr(const std::vector<Stats::Tag>& tags); // copied from statsd
   /**
    * URL handlers.
    */
@@ -201,7 +197,6 @@ public:
   void setDecoderFilterCallbacks(Http::StreamDecoderFilterCallbacks& callbacks) override {
     callbacks_ = &callbacks;
   }
-
 
 private:
   /**

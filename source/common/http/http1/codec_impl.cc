@@ -41,10 +41,8 @@ void StreamEncoderImpl::encodeHeaders(const HeaderMap& headers, bool end_stream)
   bool no_chunks = false;
   headers.iterate(
       [](const HeaderEntry& header, void* context) -> HeaderMap::Iterate {
-
         const char* key_to_use = header.key().c_str();
         uint32_t key_size_to_use = header.key().size();
-
         // Translate :authority -> host so that upper layers do not need to deal with this.
         if (key_size_to_use > 1 && key_to_use[0] == ':' && key_to_use[1] == 'a') {
           key_to_use = Headers::get().HostLegacy.get().c_str();

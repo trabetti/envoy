@@ -46,7 +46,7 @@ envoy_cc_library(
         "//source/common/router:config_lib",
         "//source/common/upstream:host_utility_lib",
         "//source/server/config/network:http_connection_manager_lib",
-        "//source/common/stats:hystrix_stats_lib",
+        "//source/common/hystrix:hystrix_lib",
     ],
 )
 

@@ -20,12 +20,12 @@
 #include "common/access_log/access_log_manager_impl.h"
 #include "common/runtime/runtime_impl.h"
 #include "common/ssl/context_manager_impl.h"
+
 #include "server/http/admin.h"
 #include "server/init_manager_impl.h"
 #include "server/listener_manager_impl.h"
 #include "server/test_hooks.h"
 #include "server/worker_impl.h"
-
 
 namespace Envoy {
 namespace Server {

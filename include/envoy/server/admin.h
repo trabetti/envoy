@@ -9,52 +9,9 @@
 #include "envoy/http/filter.h"
 #include "envoy/http/header_map.h"
 #include "envoy/network/listen_socket.h"
-#include "common/stats/hystrix_stats.h"
 
 namespace Envoy {
 namespace Server {
-
-class FilterData
-{
-public:
-	FilterData() {};
-	virtual ~FilterData() {};
-	virtual void Destroy() {};
-};
-
-class HystrixData : public FilterData {
-public:
-	HystrixData(Http::StreamDecoderFilterCallbacks* callbacks) :  stats_(new Stats::HystrixStats(Stats::HYSTRIX_NUM_OF_BUCKETS)),
-									data_timer_(nullptr), ping_timer_(nullptr), callbacks_(callbacks) {}
-	virtual ~HystrixData()
-	{
-		if (data_timer_)
-			data_timer_ = nullptr;
-		if (ping_timer_)
-			ping_timer_ = nullptr;
-	};
-	void Destroy()
-	{
-		disableHystrixTimers();
-		resetHystrixRollingWindow();
-	}
-    void disableHystrixTimers()
-    {
-	    if (data_timer_)
-	      data_timer_->disableTimer();
-	    if (ping_timer_)
-	      ping_timer_->disableTimer();
-	}
-	void resetHystrixRollingWindow()
-	{
-		  stats_->resetRollingWindow();
-	}
-
-	std::unique_ptr<Stats::HystrixStats> stats_;
-	Event::TimerPtr data_timer_;
-	Event::TimerPtr ping_timer_;
-	Http::StreamDecoderFilterCallbacks* callbacks_{};
-};
 
 /**
  * This macro is used to add handlers to the Admin HTTP Endpoint. It builds
@@ -66,6 +23,19 @@ public:
   [this](const std::string& url, Http::HeaderMap& response_headers,                                \
          Buffer::Instance& data, Server::FilterData* filter_data) ->                \
          Http::Code { return X(url, response_headers, data, filter_data); }
+
+/**
+ * This class is a base class for data which will be sent from admin filter to a handler
+ * in admin impl. Each handler which needs to receive data from admin filter can inherit from FilterData
+ * and build a class which contains the relevant data.
+ */
+class FilterData
+{
+public:
+  FilterData() {};
+  virtual ~FilterData() {};
+  virtual void Destroy() {};
+};
 
 /**
  * Global admin HTTP endpoint for the server.

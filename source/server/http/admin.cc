@@ -26,6 +26,7 @@
 #include "common/http/header_map_impl.h"
 #include "common/http/headers.h"
 #include "common/http/http1/codec_impl.h"
+#include "common/hystrix/hystrix.h"
 #include "common/json/json_loader.h"
 #include "common/network/listen_socket_impl.h"
 #include "common/profiler/profiler.h"
@@ -531,7 +532,7 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::H
       {Http::Headers::get().NoChunks, "0"} // parameter to encodeHeaders
     }};
 
-  HystrixData* hystrix_data = dynamic_cast<HystrixData*>(filter_data);
+  Hystrix::HystrixData* hystrix_data = dynamic_cast<Hystrix::HystrixData*>(filter_data);
   if (!hystrix_data)
 	  return Http::Code::InternalServerError;
 
@@ -540,66 +541,20 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::H
   // start streaming
   hystrix_data->data_timer_ =
 		  hystrix_data->callbacks_->dispatcher().createTimer(
-          [this,hystrix_data]() -> void { prepareAndSendHystrixStream(hystrix_data); });
+          [this,hystrix_data]() -> void { Hystrix::HystrixHandlers::prepareAndSendHystrixStream(hystrix_data,server_); });
   hystrix_data->data_timer_->enableTimer(
       std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS));
 
   // start ping
   hystrix_data->ping_timer_ =
 	hystrix_data->callbacks_->dispatcher().createTimer(
-    [this,hystrix_data]() -> void { sendKeepAlivePing(hystrix_data); });
+    [this,hystrix_data]() -> void { Hystrix::HystrixHandlers::sendKeepAlivePing(hystrix_data); });
 
   hystrix_data->ping_timer_->enableTimer(std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS));
 
   response.add("");
   return rc;
 }
-
-void AdminImpl::updateHystrixRollingWindow(HystrixData* hystrix_data) {
-	hystrix_data->stats_->incCounter();
-
-  for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
-    if (counter->name().find("upstream_rq_") != std::string::npos) {
-      //std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
-    	hystrix_data->stats_->pushNewValue(counter->name(), counter->value());
-    }
-  }
-}
-
-void AdminImpl::sendKeepAlivePing(HystrixData* hystrix_data) {
-  Buffer::OwnedImpl data;
-  data.add(":\n\n");
-
-  // using write() since we are sending network level
-  (const_cast<Network::Connection*>((hystrix_data->callbacks_)->connection()))->write(data);
-  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS);
-
-  hystrix_data->ping_timer_->enableTimer(ms);
-}
-
-void AdminImpl::prepareAndSendHystrixStream(HystrixData* hystrix_data) {
-  updateHystrixRollingWindow(hystrix_data);
-
-  std::stringstream ss;
-
-  for (auto& cluster : server_.clusterManager().clusters()) {
-	hystrix_data->stats_-> getHystrixClusterStats(ss, cluster.second.get().info()->name(),
-        cluster.second.get().info()->resourceManager(Upstream::ResourcePriority::Default).pendingRequests().max(),
-        cluster.second.get().prioritySet().hostSetsPerPriority().size());
-  }
-
-  Buffer::OwnedImpl data;
-  data.add(ss.str());
-
-  // using write() since we are sending network level
-  (const_cast<Network::Connection*>((hystrix_data->callbacks_)->connection()))->write(data);
-
-  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS);
-
-  hystrix_data->data_timer_->enableTimer(ms);
-
-}
-
 
 void AdminFilter::onComplete() {
   std::string path = request_headers_->Path()->value().c_str();
@@ -615,7 +570,7 @@ void AdminFilter::onComplete() {
   }
   else
   {
-	  filter_data_ = new HystrixData(callbacks_);
+	  filter_data_ = new Hystrix::HystrixData(callbacks_);
 	  code = parent_.runCallback(path, *header_map, response, filter_data_);
 	  return;
   }
