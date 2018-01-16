@@ -1,5 +1,6 @@
 #include <vector>
 #include <map>
+#include <memory>
 
 namespace Envoy {
 namespace Stats {

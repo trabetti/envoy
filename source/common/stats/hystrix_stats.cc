@@ -27,7 +27,7 @@ uint64_t HystrixStats::getRollingValue(std::string cluster_name, std::string sta
 }
 
 void HystrixStats::printRollingWindow() {
-  for (auto iterator it=rolling_stats_map_.begin(); it!=rolling_stats_map_.end(); ++it) {
+  for (auto it=rolling_stats_map_.begin(); it!=rolling_stats_map_.end(); ++it) {
     std::cout << it->first<< " | ";
     RollingStats rollingStats = it->second;
     for (int i=0; i< num_of_buckets_; i++) {
