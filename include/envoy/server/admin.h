@@ -9,6 +9,7 @@
 #include "envoy/http/filter.h"
 #include "envoy/http/header_map.h"
 #include "envoy/network/listen_socket.h"
+#include "common/stats/hystrix_stats.h"
 
 namespace Envoy {
 namespace Server {
@@ -35,6 +36,32 @@ public:
   FilterData() {};
   virtual ~FilterData() {};
   virtual void Destroy() {};
+};
+
+/**
+ * This class contains data which will be sent from admin filter to a hystrix_event_stream handler
+ * and build a class which contains the relevant data.
+ */
+class HystrixData : public FilterData {
+public:
+  HystrixData(Http::StreamDecoderFilterCallbacks* callbacks) :  stats_(new Stats::HystrixStats(Stats::HYSTRIX_NUM_OF_BUCKETS)),
+                  data_timer_(nullptr), ping_timer_(nullptr), callbacks_(callbacks) {}
+  virtual ~HystrixData() {};
+  void Destroy()
+  {
+    if (data_timer_)
+      data_timer_->disableTimer();
+    if (ping_timer_)
+      ping_timer_->disableTimer();
+  }
+
+  /**
+   * Hystrix data includes statistics for hystrix API,timer for build (and send) data and keep alive messages and the handler's callback
+   */
+  Stats::HystrixStatsPtr stats_;
+  Event::TimerPtr data_timer_;
+  Event::TimerPtr ping_timer_;
+  Http::StreamDecoderFilterCallbacks* callbacks_{};
 };
 
 /**

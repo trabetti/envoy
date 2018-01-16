@@ -17,8 +17,8 @@ static const uint64_t  HYSTRIX_PING_INTERVAL_IN_MS = 3000; // what is good value
 class HystrixStats {
 
 public:
-  HystrixStats(int num_of_buckets) : current_index_(num_of_buckets-1),
-  	  num_of_buckets_(num_of_buckets) {};
+  HystrixStats(int num_of_buckets) : current_index_(num_of_buckets-1), num_of_buckets_(num_of_buckets) {};
+
   void pushNewValue(std::string key, int value);
   void incCounter() { current_index_ = (current_index_ + 1)% num_of_buckets_;}
   void getHystrixClusterStats(std::stringstream& ss, std::string cluster_name,
@@ -34,7 +34,7 @@ private:
   void addHystrixCommand(std::stringstream& ss, std::string cluster_name,
       uint64_t max_concurrent_requests, uint64_t reporting_hosts);
   void addHystrixThreadPool(std::stringstream& ss, std::string cluster_name,
-  uint64_t queue_size, uint64_t reporting_hosts);
+      uint64_t queue_size, uint64_t reporting_hosts);
 
   RollingStatsMap rolling_stats_map_;
   int current_index_;

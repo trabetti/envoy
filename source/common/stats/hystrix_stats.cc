@@ -63,7 +63,6 @@ void HystrixStats::addInfoToStream(std::string key, std::string value, std::stri
 void HystrixStats::addHystrixCommand(std::stringstream& ss, std::string cluster_name,
     uint64_t max_concurrent_requests, uint64_t reporting_hosts) {
   std::stringstream cluster_info;
-
   std::time_t currentTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   addStringToStream("type",               "HystrixCommand",           cluster_info);
   addStringToStream("name",               cluster_name,               cluster_info);
@@ -78,8 +77,8 @@ void HystrixStats::addHystrixCommand(std::stringstream& ss, std::string cluster_
 
   // combining errors+retry errors - retries are counted as separate requests
   // (alternative: each request including the retries counted as 1)
-  // since timeouts are 504 (or 408), deduce them from here. 
-  // timeout retries were not counted here anyway.
+  // since timeouts are 504 (or 408), deduce them from here.
+  //timeout retries were not counted here anyway.
   double errors = getRollingValue(cluster_name, "upstream_rq_5xx")
                     + getRollingValue(cluster_name, "retry.upstream_rq_5xx")
                     + getRollingValue(cluster_name, "upstream_rq_4xx")
@@ -142,7 +141,8 @@ void HystrixStats::addHystrixCommand(std::stringstream& ss, std::string cluster_
   addInfoToStream("propertyValue_requestCacheEnabled", "false",           cluster_info);
   addInfoToStream("propertyValue_requestLogEnabled",    "true",           cluster_info);
   addIntToStream("reportingHosts",                      reporting_hosts,  cluster_info);
-  addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds", HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
+  addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds",
+      Stats::HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
 
   ss << "data: {" << cluster_info.str() << "}" << std::endl << std::endl;
 }
@@ -159,7 +159,7 @@ void HystrixStats::addHystrixThreadPool(std::stringstream& ss, std::string clust
   addStringToStream("type",                          "HystrixThreadPool", cluster_info);
 
   addIntToStream("reportingHosts",                       reporting_hosts, cluster_info);
-  addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds", HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
+  addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds", Stats::HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
   addStringToStream("name",                                 cluster_name, cluster_info);
   addIntToStream("currentLargestPoolSize",                  0,            cluster_info);
   addIntToStream("currentCorePoolSize",                     0,            cluster_info);
