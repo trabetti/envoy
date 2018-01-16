@@ -15,44 +15,6 @@ namespace Envoy {
 namespace Server {
 
 /**
- * This class is a base class for data which will be sent from admin filter to a handler
- * in admin impl. Each handler which needs to receive data from admin filter can inherit from FilterData
- * and build a class which contains the relevant data.
- */
-class FilterData
-{
-public:
-	FilterData() {};
-	virtual ~FilterData() {};
-	virtual void Destroy() {};
-};
-
-class HystrixData : public FilterData {
-public:
-	HystrixData(Http::StreamDecoderFilterCallbacks* callbacks) :  stats_(new Stats::HystrixStats(Stats::HYSTRIX_NUM_OF_BUCKETS)),
-									data_timer_(nullptr), ping_timer_(nullptr), callbacks_(callbacks) {}
-	virtual ~HystrixData()
-	{
-		if (data_timer_)
-			data_timer_ = nullptr;
-		if (ping_timer_)
-			ping_timer_ = nullptr;
-	};
-	void Destroy()
-	{
-    if (data_timer_)
-      data_timer_->disableTimer();
-    if (ping_timer_)
-      ping_timer_->disableTimer();
-	}
-
-	Stats::HystrixStatsPtr stats_;
-	Event::TimerPtr data_timer_;
-	Event::TimerPtr ping_timer_;
-	Http::StreamDecoderFilterCallbacks* callbacks_{};
-};
-
-/**
  * This macro is used to add handlers to the Admin HTTP Endpoint. It builds
  * a callback that executes X when the specified admin handler is hit. This macro can be
  * used to add static handlers as in source/server/http/admin.cc and also dynamic handlers as
@@ -62,6 +24,45 @@ public:
   [this](const std::string& url, Http::HeaderMap& response_headers,                                \
          Buffer::Instance& data, Server::FilterData* filter_data) ->                \
          Http::Code { return X(url, response_headers, data, filter_data); }
+
+/**
+ * This class is a base class for data which will be sent from admin filter to a handler
+ * in admin impl. Each handler which needs to receive data from admin filter can inherit from FilterData
+ * and build a class which contains the relevant data.
+ */
+class FilterData
+{
+public:
+  FilterData() {};
+  virtual ~FilterData() {};
+  virtual void Destroy() {};
+};
+
+/**
+ * This class contains data which will be sent from admin filter to a hystrix_event_stream handler
+ * and build a class which contains the relevant data.
+ */
+class HystrixData : public FilterData {
+public:
+  HystrixData(Http::StreamDecoderFilterCallbacks* callbacks) :  stats_(new Stats::HystrixStats(Stats::HYSTRIX_NUM_OF_BUCKETS)),
+                  data_timer_(nullptr), ping_timer_(nullptr), callbacks_(callbacks) {}
+  virtual ~HystrixData() {};
+  void Destroy()
+  {
+    if (data_timer_)
+      data_timer_->disableTimer();
+    if (ping_timer_)
+      ping_timer_->disableTimer();
+  }
+
+  /**
+   * Hystrix data includes statistics for hystrix API,timer for build (and send) data and keep alive messages and the handler's callback
+   */
+  Stats::HystrixStatsPtr stats_;
+  Event::TimerPtr data_timer_;
+  Event::TimerPtr ping_timer_;
+  Http::StreamDecoderFilterCallbacks* callbacks_{};
+};
 
 /**
  * Global admin HTTP endpoint for the server.

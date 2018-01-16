@@ -540,66 +540,20 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::H
   // start streaming
   hystrix_data->data_timer_ =
 		  hystrix_data->callbacks_->dispatcher().createTimer(
-          [this,hystrix_data]() -> void { prepareAndSendHystrixStream(hystrix_data); });
+          [this,hystrix_data]() -> void { HystrixHandler::prepareAndSendHystrixStream(hystrix_data,server_); });
   hystrix_data->data_timer_->enableTimer(
       std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS));
 
   // start ping
   hystrix_data->ping_timer_ =
 	hystrix_data->callbacks_->dispatcher().createTimer(
-    [this,hystrix_data]() -> void { sendKeepAlivePing(hystrix_data); });
+    [this,hystrix_data]() -> void { HystrixHandler::sendKeepAlivePing(hystrix_data); });
 
   hystrix_data->ping_timer_->enableTimer(std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS));
 
   response.add("");
   return rc;
 }
-
-void AdminImpl::updateHystrixRollingWindow(HystrixData* hystrix_data) {
-	hystrix_data->stats_->incCounter();
-
-  for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
-    if (counter->name().find("upstream_rq_") != std::string::npos) {
-      //std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
-    	hystrix_data->stats_->pushNewValue(counter->name(), counter->value());
-    }
-  }
-}
-
-void AdminImpl::sendKeepAlivePing(HystrixData* hystrix_data) {
-  Buffer::OwnedImpl data;
-  data.add(":\n\n");
-
-  // using write() since we are sending network level
-  (const_cast<Network::Connection*>((hystrix_data->callbacks_)->connection()))->write(data);
-  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS);
-
-  hystrix_data->ping_timer_->enableTimer(ms);
-}
-
-void AdminImpl::prepareAndSendHystrixStream(HystrixData* hystrix_data) {
-  updateHystrixRollingWindow(hystrix_data);
-
-  std::stringstream ss;
-
-  for (auto& cluster : server_.clusterManager().clusters()) {
-	hystrix_data->stats_-> getHystrixClusterStats(ss, cluster.second.get().info()->name(),
-        cluster.second.get().info()->resourceManager(Upstream::ResourcePriority::Default).pendingRequests().max(),
-        cluster.second.get().prioritySet().hostSetsPerPriority().size());
-  }
-
-  Buffer::OwnedImpl data;
-  data.add(ss.str());
-
-  // using write() since we are sending network level
-  (const_cast<Network::Connection*>((hystrix_data->callbacks_)->connection()))->write(data);
-
-  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS);
-
-  hystrix_data->data_timer_->enableTimer(ms);
-
-}
-
 
 void AdminFilter::onComplete() {
   std::string path = request_headers_->Path()->value().c_str();
@@ -834,6 +788,51 @@ bool AdminImpl::removeHandler(const std::string& prefix) {
     return true;
   }
   return false;
+}
+
+void HystrixHandler::updateHystrixRollingWindow(HystrixData* hystrix_data, Server::Instance& server) {
+  hystrix_data->stats_->incCounter();
+
+  for (const Stats::CounterSharedPtr& counter : server.stats().counters()) {
+    if (counter->name().find("upstream_rq_") != std::string::npos) {
+      //std::cout << "counter name: " << counter->name() << ", counter value: " << counter->value() << std::endl;
+      hystrix_data->stats_->pushNewValue(counter->name(), counter->value());
+    }
+  }
+}
+
+void HystrixHandler::prepareAndSendHystrixStream(HystrixData* hystrix_data, Server::Instance& server) {
+  updateHystrixRollingWindow(hystrix_data,server);
+
+  std::stringstream ss;
+
+  for (auto& cluster : server.clusterManager().clusters()) {
+  hystrix_data->stats_-> getHystrixClusterStats(ss, cluster.second.get().info()->name(),
+        cluster.second.get().info()->resourceManager(Upstream::ResourcePriority::Default).pendingRequests().max(),
+        cluster.second.get().prioritySet().hostSetsPerPriority().size());
+  }
+
+  Buffer::OwnedImpl data;
+  data.add(ss.str());
+
+  // using write() since we are sending network level
+  (const_cast<Network::Connection*>((hystrix_data->callbacks_)->connection()))->write(data);
+
+  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS);
+
+  hystrix_data->data_timer_->enableTimer(ms);
+
+}
+
+void HystrixHandler::sendKeepAlivePing(HystrixData* hystrix_data) {
+  Buffer::OwnedImpl data;
+  data.add(":\n\n");
+
+  // using write() since we are sending network level
+  (const_cast<Network::Connection*>((hystrix_data->callbacks_)->connection()))->write(data);
+  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS);
+
+  hystrix_data->ping_timer_->enableTimer(ms);
 }
 
 } // namespace Server

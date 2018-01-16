@@ -119,10 +119,6 @@ private:
 
   std::vector<const UrlHandler*> sortedHandlers() const;
 
-  void updateHystrixRollingWindow(HystrixData* hystrix_data);
-  void prepareAndSendHystrixStream(HystrixData* hystrix_data);
-  void sendKeepAlivePing(HystrixData* hystrix_data);
-//  const std::string buildTagStr(const std::vector<Stats::Tag>& tags); // copied from statsd
   /**
    * URL handlers.
    */
@@ -202,7 +198,6 @@ public:
     callbacks_ = &callbacks;
   }
 
-
 private:
   /**
    * Called when an admin request has been completely received.
@@ -244,6 +239,31 @@ private:
    * Take a string and sanitize it according to Prometheus conventions.
    */
   static std::string sanitizeName(const std::string& name);
+};
+
+/**
+ * Convert statistics from envoy format to hystrix format and prepare them and writes them to the appropriate socket
+ */
+class HystrixHandler
+{
+public:
+  /**
+   * Update counter and set values of upstream_rq statistics
+   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
+   * @param server contains envoy statistics
+   */
+  static void updateHystrixRollingWindow(HystrixData* hystrix_data, Server::Instance& server);
+  /**
+   * Builds a buffer of envoy statistics which will be sent to hystrix dashboard according to hystrix API
+   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
+   * @param server contains envoy statistics*
+   */
+  static void prepareAndSendHystrixStream(HystrixData* hystrix_data, Server::Instance& server);
+  /**
+   * Sends a keep alive (ping) message to hystrix dashboard
+   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
+   */
+  static void sendKeepAlivePing(HystrixData* hystrix_data);
 };
 
 } // namespace Server
