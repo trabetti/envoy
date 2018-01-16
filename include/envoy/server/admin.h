@@ -14,6 +14,11 @@
 namespace Envoy {
 namespace Server {
 
+/**
+ * This class is a base class for data which will be sent from admin filter to a handler
+ * in admin impl. Each handler which needs to receive data from admin filter can inherit from FilterData
+ * and build a class which contains the relevant data.
+ */
 class FilterData
 {
 public:
@@ -35,22 +40,13 @@ public:
 	};
 	void Destroy()
 	{
-		disableHystrixTimers();
-		resetHystrixRollingWindow();
-	}
-    void disableHystrixTimers()
-    {
-	    if (data_timer_)
-	      data_timer_->disableTimer();
-	    if (ping_timer_)
-	      ping_timer_->disableTimer();
-	}
-	void resetHystrixRollingWindow()
-	{
-		  stats_->resetRollingWindow();
+    if (data_timer_)
+      data_timer_->disableTimer();
+    if (ping_timer_)
+      ping_timer_->disableTimer();
 	}
 
-	std::unique_ptr<Stats::HystrixStats> stats_;
+	Stats::HystrixStatsPtr stats_;
 	Event::TimerPtr data_timer_;
 	Event::TimerPtr ping_timer_;
 	Http::StreamDecoderFilterCallbacks* callbacks_{};

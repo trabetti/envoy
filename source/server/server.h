@@ -13,6 +13,7 @@
 #include "envoy/server/guarddog.h"
 #include "envoy/server/instance.h"
 #include "envoy/ssl/context_manager.h"
+
 #include "envoy/stats/stats.h"
 #include "envoy/stats/stats_macros.h"
 #include "envoy/tracing/http_tracer.h"
@@ -25,7 +26,6 @@
 #include "server/listener_manager_impl.h"
 #include "server/test_hooks.h"
 #include "server/worker_impl.h"
-
 
 namespace Envoy {
 namespace Server {

@@ -112,7 +112,6 @@ public:
     return nullptr;
   }
 
-
 private:
   void initialize(Options& options, Network::Address::InstanceConstSharedPtr local_address,
                   ComponentFactory& component_factory);

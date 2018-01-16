@@ -6,8 +6,6 @@
 #include <functional>
 #include <string>
 #include <unordered_set>
-#include <iomanip>
-
 
 #include "envoy/event/dispatcher.h"
 #include "envoy/event/signal.h"
