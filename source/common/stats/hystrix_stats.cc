@@ -18,14 +18,27 @@ void HystrixStats::pushNewValue(std::string key, int value){
 
 uint64_t HystrixStats::getRollingValue(std::string cluster_name, std::string stats) {
   std::string key = "cluster." + cluster_name + "." + stats;
-  if (rolling_stats_map_.find(key) != rolling_stats_map_.end())
-    // TODO: counter may be reset during action
-    return rolling_stats_map_[key][current_index_]-
-        rolling_stats_map_[key][(current_index_+1)%num_of_buckets_];
+
+  if (rolling_stats_map_.find(key) != rolling_stats_map_.end()) {
+    // if the counter was reset, the result is negative
+    // better return 0, will be back to normal once one rolling window passes
+    // better idea what to return? could change the algorithm to keep last valid delta,
+    // updated with pushNewValue and kept stable when the update is negative.
+    if (rolling_stats_map_[key][current_index_] <
+        rolling_stats_map_[key][(current_index_+1)%num_of_buckets_]) {
+      return 0;
+    }
+    else {
+      return rolling_stats_map_[key][current_index_]-
+          rolling_stats_map_[key][(current_index_+1)%num_of_buckets_];
+
+    }
+  }
   else
     return 0;
 }
 
+// to be removed
 void HystrixStats::printRollingWindow() {
   for (auto it=rolling_stats_map_.begin(); it!=rolling_stats_map_.end(); ++it) {
     std::cout << it->first<< " | ";
@@ -41,17 +54,12 @@ void HystrixStats::resetRollingWindow() {
   rolling_stats_map_.clear();
 }
 
-// TODO: addStringToStream and addIntToStream should call addInfoToStream
 void HystrixStats::addStringToStream(std::string key, std::string value, std::stringstream& info) {
-  if (!info.str().empty())
-    info << ", ";
-  info << "\"" + key + "\": \"" + value + "\"";
+  addInfoToStream(key, "\"" + value + "\"", info);
 }
 
 void HystrixStats::addIntToStream(std::string key, uint64_t value, std::stringstream& info) {
-  if (!info.str().empty())
-    info << ", ";
-  info << "\"" + key + "\": " + std::to_string(value);
+  addInfoToStream(key, std::to_string(value), info);
 }
 
 void HystrixStats::addInfoToStream(std::string key, std::string value, std::stringstream& info) {
@@ -78,7 +86,7 @@ void HystrixStats::addHystrixCommand(std::stringstream& ss, std::string cluster_
   // combining errors+retry errors - retries are counted as separate requests
   // (alternative: each request including the retries counted as 1)
   // since timeouts are 504 (or 408), deduce them from here.
-  //timeout retries were not counted here anyway.
+  // timeout retries were not counted here anyway.
   double errors = getRollingValue(cluster_name, "upstream_rq_5xx")
                     + getRollingValue(cluster_name, "retry.upstream_rq_5xx")
                     + getRollingValue(cluster_name, "upstream_rq_4xx")
@@ -89,7 +97,8 @@ void HystrixStats::addHystrixCommand(std::stringstream& ss, std::string cluster_
 
   double rejected = getRollingValue(cluster_name, "upstream_rq_pending_overflow");
 
-  //double total = getRollingValue("cluster." + cluster_name + ".upstream_rq_total");
+  // should not take from upstream_rq_total since it is updated before its components,
+  // leading to wrong results such as error percentage bigger than 100%
   double total = errors + timeouts + success + rejected;
 
   double error_rate = total == 0 ? 0 : ((errors + timeouts + rejected)/total)*100;
@@ -119,30 +128,31 @@ void HystrixStats::addHystrixCommand(std::stringstream& ss, std::string cluster_
   addIntToStream("rollingCountBadRequests",         0,          cluster_info);
   addIntToStream("currentConcurrentExecutionCount", 0,          cluster_info);
   addIntToStream("latencyExecute_mean",             0,          cluster_info);
+
+  // latency information can be  taken rom hystogram, which is only available to sinks
+  // we should consider make this a sink so we can get this information
   addInfoToStream("latencyExecute",
-      "{\"0\":0,\"25\":0,\"50\":0,\"75\":0,\"90\":0,\"95\":0,\"99\":0,\"99.5\":0,\"100\":0}",
-      cluster_info);
+                  "{\"0\":0,\"25\":0,\"50\":0,\"75\":0,\"90\":0,\"95\":0,\"99\":0,\"99.5\":0,\"100\":0}",
+                  cluster_info);
   addIntToStream("propertyValue_circuitBreakerRequestVolumeThreshold",
-      0, cluster_info);
+                 0, cluster_info);
   addIntToStream("propertyValue_circuitBreakerSleepWindowInMilliseconds", 0, cluster_info);
   addIntToStream("propertyValue_circuitBreakerErrorThresholdPercentage",
-      0, cluster_info);
+                 0, cluster_info);
   addInfoToStream("propertyValue_circuitBreakerForceOpen",      "false",    cluster_info);
   addInfoToStream("propertyValue_circuitBreakerForceClosed",    "true",     cluster_info);
-  // removed from hystrix(?)    addInfoToStream("propertyValue_circuitBreakerEnabled", "true", cluster_info);
   addStringToStream("propertyValue_executionIsolationStrategy", "SEMAPHORE", cluster_info);
   addIntToStream("propertyValue_executionIsolationThreadTimeoutInMilliseconds",
-      0, cluster_info);
+                 0, cluster_info);
   addInfoToStream("propertyValue_executionIsolationThreadInterruptOnTimeout", "false", cluster_info);
-  // removed from hystrix(?)        //    "propertyValue_executionIsolationThreadPoolKeyOverride": null,
   addIntToStream("propertyValue_executionIsolationSemaphoreMaxConcurrentRequests",
-      max_concurrent_requests, cluster_info);
+                 max_concurrent_requests, cluster_info);
   addIntToStream("propertyValue_fallbackIsolationSemaphoreMaxConcurrentRequests", 0, cluster_info);
   addInfoToStream("propertyValue_requestCacheEnabled", "false",           cluster_info);
   addInfoToStream("propertyValue_requestLogEnabled",    "true",           cluster_info);
   addIntToStream("reportingHosts",                      reporting_hosts,  cluster_info);
   addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds",
-      Stats::HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
+                 Stats::HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
 
   ss << "data: {" << cluster_info.str() << "}" << std::endl << std::endl;
 }

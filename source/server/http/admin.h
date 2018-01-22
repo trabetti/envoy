@@ -160,7 +160,7 @@ private:
   Http::Code handlerStats(const std::string& path_and_query, Http::HeaderMap& response_headers,
                           Buffer::Instance& response, FilterData*);
   Http::Code handlerHystrixEventStream(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                                       Buffer::Instance& response, FilterData* filter_data);
+                                       Buffer::Instance&, FilterData* filter_data);
 
   Server::Instance& server_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
