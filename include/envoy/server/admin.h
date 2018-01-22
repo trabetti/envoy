@@ -44,8 +44,9 @@ public:
  */
 class HystrixData : public FilterData {
 public:
-  HystrixData(Http::StreamDecoderFilterCallbacks* callbacks) :  stats_(new Stats::HystrixStats(Stats::HYSTRIX_NUM_OF_BUCKETS)),
-                  data_timer_(nullptr), ping_timer_(nullptr), callbacks_(callbacks) {}
+  HystrixData(Http::StreamDecoderFilterCallbacks* callbacks) :
+    stats_(new Stats::HystrixStats(Stats::HYSTRIX_NUM_OF_BUCKETS)),
+           data_timer_(nullptr), ping_timer_(nullptr), callbacks_(callbacks) {}
   virtual ~HystrixData() {};
   void Destroy()
   {
@@ -56,7 +57,8 @@ public:
   }
 
   /**
-   * Hystrix data includes statistics for hystrix API,timer for build (and send) data and keep alive messages and the handler's callback
+   * Hystrix data includes statistics for hystrix API,timer for build (and send) data and keep
+   * alive messages and the handler's callback
    */
   Stats::HystrixStatsPtr stats_;
   Event::TimerPtr data_timer_;
