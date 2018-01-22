@@ -41,7 +41,7 @@ public:
             Server::Instance& server, Stats::ScopePtr&& listener_scope);
 
   Http::Code runCallback(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                         Buffer::Instance& response);
+                         Buffer::Instance& response, FilterData* filter_data);
   const Network::ListenSocket& socket() override { return *socket_; }
   Network::ListenSocket& mutable_socket() { return *socket_; }
   Network::ListenerConfig& listener() { return listener_; }
@@ -133,37 +133,46 @@ private:
    * URL handlers.
    */
   Http::Code handlerAdminHome(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                              Buffer::Instance& response);
+                              Buffer::Instance& response, FilterData*);
   Http::Code handlerCerts(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                          Buffer::Instance& response);
+                          Buffer::Instance& response, FilterData*);
   Http::Code handlerClusters(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                             Buffer::Instance& response);
+                             Buffer::Instance& response, FilterData*);
   Http::Code handlerCpuProfiler(const std::string& path_and_query,
-                                Http::HeaderMap& response_headers, Buffer::Instance& response);
+                                Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                FilterData*);
   Http::Code handlerHealthcheckFail(const std::string& path_and_query,
-                                    Http::HeaderMap& response_headers, Buffer::Instance& response);
+                                    Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                    FilterData*);
   Http::Code handlerHealthcheckOk(const std::string& path_and_query,
-                                  Http::HeaderMap& response_headers, Buffer::Instance& response);
+                                  Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                  FilterData*);
   Http::Code handlerHelp(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                         Buffer::Instance& response);
+                         Buffer::Instance& response, FilterData*);
   Http::Code handlerHotRestartVersion(const std::string& path_and_query,
                                       Http::HeaderMap& response_headers,
-                                      Buffer::Instance& response);
+                                      Buffer::Instance& response, FilterData*);
   Http::Code handlerListenerInfo(const std::string& path_and_query,
-                                 Http::HeaderMap& response_headers, Buffer::Instance& response);
+                                 Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                 FilterData*);
   Http::Code handlerLogging(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                            Buffer::Instance& response);
+                            Buffer::Instance& response, FilterData*);
   Http::Code handlerMain(const std::string& path, Buffer::Instance& response);
   Http::Code handlerQuitQuitQuit(const std::string& path_and_query,
-                                 Http::HeaderMap& response_headers, Buffer::Instance& response);
+                                 Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                 FilterData*);
   Http::Code handlerResetCounters(const std::string& path_and_query,
-                                  Http::HeaderMap& response_headers, Buffer::Instance& response);
+                                  Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                  FilterData*);
   Http::Code handlerServerInfo(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                               Buffer::Instance& response);
+                               Buffer::Instance& response, FilterData*);
   Http::Code handlerStats(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                          Buffer::Instance& response);
+                          Buffer::Instance& response, FilterData*);
   Http::Code handlerRuntime(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                            Buffer::Instance& response);
+                            Buffer::Instance& response, FilterData*);
+  Http::Code handlerHystrixEventStream(const std::string& path_and_query,
+                                       Http::HeaderMap& response_headers,
+                                       Buffer::Instance&, FilterData* filter_data);
 
   class AdminListener : public Network::ListenerConfig {
   public:
@@ -211,7 +220,9 @@ public:
   AdminFilter(AdminImpl& parent);
 
   // Http::StreamFilterBase
-  void onDestroy() override {}
+  void onDestroy() override {
+    filter_data_->Destroy();
+  }
 
   // Http::StreamDecoderFilter
   Http::FilterHeadersStatus decodeHeaders(Http::HeaderMap& response_headers,
@@ -231,6 +242,7 @@ private:
   AdminImpl& parent_;
   Http::StreamDecoderFilterCallbacks* callbacks_{};
   Http::HeaderMap* request_headers_{};
+  FilterData* filter_data_;
 };
 
 /**
@@ -262,6 +274,31 @@ private:
    * Take a string and sanitize it according to Prometheus conventions.
    */
   static std::string sanitizeName(const std::string& name);
+};
+
+/**
+ * Convert statistics from envoy format to hystrix format and prepare them and writes them to the appropriate socket
+ */
+class HystrixHandler
+{
+public:
+  /**
+   * Update counter and set values of upstream_rq statistics
+   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
+   * @param server contains envoy statistics
+   */
+  static void updateHystrixRollingWindow(HystrixData* hystrix_data, Server::Instance& server);
+  /**
+   * Builds a buffer of envoy statistics which will be sent to hystrix dashboard according to hystrix API
+   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
+   * @param server contains envoy statistics*
+   */
+  static void prepareAndSendHystrixStream(HystrixData* hystrix_data, Server::Instance& server);
+  /**
+   * Sends a keep alive (ping) message to hystrix dashboard
+   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
+   */
+  static void sendKeepAlivePing(HystrixData* hystrix_data);
 };
 
 } // namespace Server
