@@ -3,9 +3,13 @@
 #include <chrono>
 #include <list>
 #include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "envoy/http/filter.h"
 #include "envoy/network/listen_socket.h"
+#include "envoy/runtime/runtime.h"
 #include "envoy/server/admin.h"
 #include "envoy/server/instance.h"
 #include "envoy/upstream/outlier_detection.h"
@@ -36,7 +40,7 @@ public:
             Server::Instance& server, Stats::Scope& listener_scope);
 
   Http::Code runCallback(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                         Buffer::Instance& response, FilterData* filter_data);
+                         Buffer::Instance& response);
   const Network::ListenSocket& socket() override { return *socket_; }
   Network::ListenSocket& mutable_socket() { return *socket_; }
 
@@ -116,51 +120,47 @@ private:
                       const Upstream::Outlier::Detector* outlier_detector,
                       Buffer::Instance& response);
   static std::string statsAsJson(const std::map<std::string, uint64_t>& all_stats);
-
+  static std::string
+  runtimeAsJson(const std::vector<std::pair<std::string, Runtime::Snapshot::Entry>>& entries);
   std::vector<const UrlHandler*> sortedHandlers() const;
+  static const std::vector<std::pair<std::string, Runtime::Snapshot::Entry>>
+  sortedRuntime(const std::unordered_map<std::string, const Runtime::Snapshot::Entry>& entries);
 
   /**
    * URL handlers.
    */
   Http::Code handlerAdminHome(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                              Buffer::Instance& response, FilterData*);
+                              Buffer::Instance& response);
   Http::Code handlerCerts(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                          Buffer::Instance& response, FilterData*);
+                          Buffer::Instance& response);
   Http::Code handlerClusters(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                             Buffer::Instance& response, FilterData*);
+                             Buffer::Instance& response);
   Http::Code handlerCpuProfiler(const std::string& path_and_query,
-                                Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                FilterData*);
+                                Http::HeaderMap& response_headers, Buffer::Instance& response);
   Http::Code handlerHealthcheckFail(const std::string& path_and_query,
-                                    Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                    FilterData*);
+                                    Http::HeaderMap& response_headers, Buffer::Instance& response);
   Http::Code handlerHealthcheckOk(const std::string& path_and_query,
-                                  Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                  FilterData*);
+                                  Http::HeaderMap& response_headers, Buffer::Instance& response);
   Http::Code handlerHelp(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                         Buffer::Instance& response, FilterData*);
+                         Buffer::Instance& response);
   Http::Code handlerHotRestartVersion(const std::string& path_and_query,
                                       Http::HeaderMap& response_headers,
-                                      Buffer::Instance& response, FilterData*);
+                                      Buffer::Instance& response);
   Http::Code handlerListenerInfo(const std::string& path_and_query,
-                                 Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                 FilterData*);
+                                 Http::HeaderMap& response_headers, Buffer::Instance& response);
   Http::Code handlerLogging(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                            Buffer::Instance& response, FilterData*);
-  Http::Code handlerMain(const std::string& path, Buffer::Instance& response, 
-                         FilterData*);
+                            Buffer::Instance& response);
+  Http::Code handlerMain(const std::string& path, Buffer::Instance& response);
   Http::Code handlerQuitQuitQuit(const std::string& path_and_query,
-                                 Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                 FilterData*);
+                                 Http::HeaderMap& response_headers, Buffer::Instance& response);
   Http::Code handlerResetCounters(const std::string& path_and_query,
-                                  Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                  FilterData*);
+                                  Http::HeaderMap& response_headers, Buffer::Instance& response);
   Http::Code handlerServerInfo(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                               Buffer::Instance& response, FilterData*);
+                               Buffer::Instance& response);
   Http::Code handlerStats(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                          Buffer::Instance& response, FilterData*);
-  Http::Code handlerHystrixEventStream(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                                       Buffer::Instance& response, FilterData* filter_data);
+                          Buffer::Instance& response);
+  Http::Code handlerRuntime(const std::string& path_and_query, Http::HeaderMap& response_headers,
+                            Buffer::Instance& response);
 
   Server::Instance& server_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
@@ -185,9 +185,7 @@ public:
   AdminFilter(AdminImpl& parent);
 
   // Http::StreamFilterBase
-  void onDestroy() override {
-	  filter_data_->Destroy();
-  }
+  void onDestroy() override {}
 
   // Http::StreamDecoderFilter
   Http::FilterHeadersStatus decodeHeaders(Http::HeaderMap& response_headers,
@@ -207,7 +205,6 @@ private:
   AdminImpl& parent_;
   Http::StreamDecoderFilterCallbacks* callbacks_{};
   Http::HeaderMap* request_headers_{};
-  FilterData* filter_data_;
 };
 
 /**
@@ -239,31 +236,6 @@ private:
    * Take a string and sanitize it according to Prometheus conventions.
    */
   static std::string sanitizeName(const std::string& name);
-};
-
-/**
- * Convert statistics from envoy format to hystrix format and prepare them and writes them to the appropriate socket
- */
-class HystrixHandler
-{
-public:
-  /**
-   * Update counter and set values of upstream_rq statistics
-   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
-   * @param server contains envoy statistics
-   */
-  static void updateHystrixRollingWindow(HystrixData* hystrix_data, Server::Instance& server);
-  /**
-   * Builds a buffer of envoy statistics which will be sent to hystrix dashboard according to hystrix API
-   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
-   * @param server contains envoy statistics*
-   */
-  static void prepareAndSendHystrixStream(HystrixData* hystrix_data, Server::Instance& server);
-  /**
-   * Sends a keep alive (ping) message to hystrix dashboard
-   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
-   */
-  static void sendKeepAlivePing(HystrixData* hystrix_data);
 };
 
 } // namespace Server
