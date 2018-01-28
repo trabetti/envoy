@@ -24,9 +24,7 @@ envoy_cc_library(
     deps = [
         "//include/envoy/buffer:buffer_interface",
         "//include/envoy/http:codes_interface",
-        "//include/envoy/http:filter_interface",
         "//include/envoy/network:listen_socket_interface",
-        "//source/common/stats:hystrix_stats_lib",        
     ],
 )
 
@@ -112,6 +110,7 @@ envoy_cc_library(
 envoy_cc_library(
     name = "filter_config_interface",
     hdrs = ["filter_config.h"],
+    external_deps = ["envoy_base"],
     deps = [
         ":admin_interface",
         "//include/envoy/access_log:access_log_interface",

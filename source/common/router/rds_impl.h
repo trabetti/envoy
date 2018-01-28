@@ -173,8 +173,7 @@ private:
    * @return Http::Code OK if the endpoint can parse and operate on the url, NotFound otherwise.
    */
   Http::Code handlerRoutes(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                           Buffer::Instance& response,
-			   Server::FilterData* filter_data);
+                           Buffer::Instance& response);
 
   /**
    * Helper function used by handlerRoutes. The function loops through the providers

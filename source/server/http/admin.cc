@@ -4,9 +4,13 @@
 #include <cstdint>
 #include <fstream>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "envoy/filesystem/filesystem.h"
+#include "envoy/runtime/runtime.h"
 #include "envoy/server/hot_restart.h"
 #include "envoy/server/instance.h"
 #include "envoy/server/options.h"
@@ -215,8 +219,7 @@ void AdminImpl::addCircuitSettings(const std::string& cluster_name, const std::s
 }
 
 Http::Code AdminImpl::handlerClusters(const std::string&, Http::HeaderMap&,
-                                      Buffer::Instance& response, 
-                                      FilterData*) {
+                                      Buffer::Instance& response, FilterData*) {
   response.add(fmt::format("version_info::{}\n", server_.clusterManager().versionInfo()));
 
   for (auto& cluster : server_.clusterManager().clusters()) {
@@ -272,9 +275,8 @@ Http::Code AdminImpl::handlerClusters(const std::string&, Http::HeaderMap&,
   return Http::Code::OK;
 }
 
-Http::Code AdminImpl::handlerCpuProfiler(const std::string& url, Http::HeaderMap&, 
-                                         Buffer::Instance& response, 
-                                         FilterData*) {
+Http::Code AdminImpl::handlerCpuProfiler(const std::string& url, Http::HeaderMap&,
+                                         Buffer::Instance& response, FilterData*) {
   Http::Utility::QueryParams query_params = Http::Utility::parseQueryString(url);
   if (query_params.size() != 1 || query_params.begin()->first != "enable" ||
       (query_params.begin()->second != "y" && query_params.begin()->second != "n")) {
@@ -298,31 +300,27 @@ Http::Code AdminImpl::handlerCpuProfiler(const std::string& url, Http::HeaderMap
 }
 
 Http::Code AdminImpl::handlerHealthcheckFail(const std::string&, Http::HeaderMap&,
-                                             Buffer::Instance& response,
-    			                     FilterData*) {
+                                             Buffer::Instance& response, FilterData*) {
   server_.failHealthcheck(true);
   response.add("OK\n");
   return Http::Code::OK;
 }
 
 Http::Code AdminImpl::handlerHealthcheckOk(const std::string&, Http::HeaderMap&,
-                                           Buffer::Instance& response,
-                                           FilterData*) {
+                                           Buffer::Instance& response, FilterData*) {
   server_.failHealthcheck(false);
   response.add("OK\n");
   return Http::Code::OK;
 }
 
 Http::Code AdminImpl::handlerHotRestartVersion(const std::string&, Http::HeaderMap&,
-                                               Buffer::Instance& response,
-                                               FilterData*) {
+                                               Buffer::Instance& response, FilterData*) {
   response.add(server_.hotRestart().version());
   return Http::Code::OK;
 }
 
 Http::Code AdminImpl::handlerLogging(const std::string& url, Http::HeaderMap&,
-                                     Buffer::Instance& response,
-                                     FilterData*) {
+                                     Buffer::Instance& response, FilterData*) {
   Http::Utility::QueryParams query_params = Http::Utility::parseQueryString(url);
 
   Http::Code rc = Http::Code::OK;
@@ -348,8 +346,7 @@ Http::Code AdminImpl::handlerLogging(const std::string& url, Http::HeaderMap&,
 }
 
 Http::Code AdminImpl::handlerResetCounters(const std::string&, Http::HeaderMap&,
-                                           Buffer::Instance& response,
-                                           FilterData*) {
+                                           Buffer::Instance& response, FilterData*) {
   for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
     counter->reset();
   }
@@ -358,9 +355,8 @@ Http::Code AdminImpl::handlerResetCounters(const std::string&, Http::HeaderMap&,
   return Http::Code::OK;
 }
 
-Http::Code AdminImpl::handlerServerInfo(const std::string&,  Http::HeaderMap&,
-                                        Buffer::Instance& response,
-                                        FilterData*) {
+Http::Code AdminImpl::handlerServerInfo(const std::string&, Http::HeaderMap&,
+                                        Buffer::Instance& response, FilterData*) {
   time_t current_time = time(nullptr);
   response.add(fmt::format("envoy {} {} {} {} {}\n", VersionInfo::version(),
                            server_.healthCheckFailed() ? "draining" : "live",
@@ -371,8 +367,7 @@ Http::Code AdminImpl::handlerServerInfo(const std::string&,  Http::HeaderMap&,
 }
 
 Http::Code AdminImpl::handlerStats(const std::string& url, Http::HeaderMap& response_headers,
-                                   Buffer::Instance& response,
-                                   FilterData*) {
+                                   Buffer::Instance& response, FilterData*) {
   // We currently don't support timers locally (only via statsd) so just group all the counters
   // and gauges together, alpha sort them, and spit them out.
   Http::Code rc = Http::Code::OK;
@@ -474,16 +469,14 @@ std::string AdminImpl::statsAsJson(const std::map<std::string, uint64_t>& all_st
 }
 
 Http::Code AdminImpl::handlerQuitQuitQuit(const std::string&, Http::HeaderMap&,
-                                          Buffer::Instance& response,
-                                          FilterData*) {
+                                          Buffer::Instance& response, FilterData*) {
   server_.shutdown();
   response.add("OK\n");
   return Http::Code::OK;
 }
 
 Http::Code AdminImpl::handlerListenerInfo(const std::string&, Http::HeaderMap& response_headers,
-                                          Buffer::Instance& response,
-                                          FilterData*) {
+                                          Buffer::Instance& response, FilterData*) {
   response_headers.insertContentType().value().setReference(
       Http::Headers::get().ContentTypeValues.Json);
   std::list<std::string> listeners;
@@ -495,8 +488,7 @@ Http::Code AdminImpl::handlerListenerInfo(const std::string&, Http::HeaderMap& r
 }
 
 Http::Code AdminImpl::handlerCerts(const std::string&, Http::HeaderMap&,
-                                   Buffer::Instance& response, 
-                                   FilterData*) {
+                                   Buffer::Instance& response, FilterData*) {
   // This set is used to track distinct certificates. We may have multiple listeners, upstreams, etc
   // using the same cert.
   std::unordered_set<std::string> context_info_set;
@@ -514,11 +506,77 @@ Http::Code AdminImpl::handlerCerts(const std::string&, Http::HeaderMap&,
   return Http::Code::OK;
 }
 
-Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::HeaderMap& ,//response_headers,
-                                                Buffer::Instance&,
-                                                FilterData* filter_data) {
+Http::Code AdminImpl::handlerRuntime(const std::string& url, Http::HeaderMap& response_headers,
+                                     Buffer::Instance& response) {
   Http::Code rc = Http::Code::OK;
   const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
+  const auto& entries = server_.runtime().snapshot().getAll();
+  const auto pairs = sortedRuntime(entries);
+
+  if (params.size() == 0) {
+    for (const auto& entry : pairs) {
+      response.add(fmt::format("{}: {}\n", entry.first, entry.second.string_value_));
+    }
+  } else {
+    if (params.begin()->first == "format" && params.begin()->second == "json") {
+      response_headers.insertContentType().value().setReference(
+          Http::Headers::get().ContentTypeValues.Json);
+      response.add(runtimeAsJson(pairs));
+      response.add("\n");
+    } else {
+      response.add("usage: /runtime?format=json\n");
+      rc = Http::Code::BadRequest;
+    }
+  }
+  return rc;
+}
+
+const std::vector<std::pair<std::string, Runtime::Snapshot::Entry>> AdminImpl::sortedRuntime(
+    const std::unordered_map<std::string, const Runtime::Snapshot::Entry>& entries) {
+  std::vector<std::pair<std::string, Runtime::Snapshot::Entry>> pairs(entries.begin(),
+                                                                      entries.end());
+
+  std::sort(pairs.begin(), pairs.end(),
+            [](const std::pair<std::string, const Runtime::Snapshot::Entry>& a,
+               const std::pair<std::string, const Runtime::Snapshot::Entry>& b) -> bool {
+              return a.first < b.first;
+            });
+
+  return pairs;
+}
+
+std::string AdminImpl::runtimeAsJson(
+    const std::vector<std::pair<std::string, Runtime::Snapshot::Entry>>& entries) {
+  rapidjson::Document document;
+  document.SetObject();
+  rapidjson::Value entries_array(rapidjson::kArrayType);
+  rapidjson::Document::AllocatorType& allocator = document.GetAllocator();
+  for (const auto& entry : entries) {
+    Value entry_obj;
+    entry_obj.SetObject();
+
+    entry_obj.AddMember("name", {entry.first.c_str(), allocator}, allocator);
+
+    Value entry_value;
+    if (entry.second.uint_value_.valid()) {
+      entry_value.SetUint64(entry.second.uint_value_.value());
+    } else {
+      entry_value.SetString(entry.second.string_value_.c_str(), allocator);
+    }
+    entry_obj.AddMember("value", entry_value, allocator);
+
+    entries_array.PushBack(entry_obj, allocator);
+  }
+  document.AddMember("runtime", entries_array, allocator);
+  rapidjson::StringBuffer strbuf;
+  rapidjson::PrettyWriter<StringBuffer> writer(strbuf);
+  document.Accept(writer);
+  return strbuf.GetString();
+}
+
+Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Http::HeaderMap& ,
+                                                  Buffer::Instance&, FilterData* filter_data) {
+  Http::Code rc = Http::Code::OK;
 
   // sending our own OK since dashboard doesn't work with Nosniff header
   Http::HeaderMapPtr headers{
@@ -526,7 +584,8 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::H
       {Http::Headers::get().ContentType,  Http::Headers::get().ContentTypeValues.TextEventStream},
       {Http::Headers::get().CacheControl, Http::Headers::get().CacheControlValues.NoCache},
       {Http::Headers::get().Connection,   Http::Headers::get().ConnectionValues.Close},
-      {Http::Headers::get().AccessControlAllowHeaders, Http::Headers::get().AccessControlAllowHeadersValue.AccessControlAllowHeadersHystrix},
+      {Http::Headers::get().AccessControlAllowHeaders,
+          Http::Headers::get().AccessControlAllowHeadersValue.AccessControlAllowHeadersHystrix},
       {Http::Headers::get().AccessControlAllowOrigin, "*"},
       {Http::Headers::get().NoChunks, "0"} // parameter to encodeHeaders
     }};
@@ -541,7 +600,8 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::H
   // start streaming
   hystrix_data->data_timer_ =
 		  hystrix_data->callbacks_->dispatcher().createTimer(
-          [this,hystrix_data]() -> void { HystrixHandler::prepareAndSendHystrixStream(hystrix_data,server_); });
+          [this,hystrix_data]() -> void {
+    HystrixHandler::prepareAndSendHystrixStream(hystrix_data,server_); });
   hystrix_data->data_timer_->enableTimer(
       std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS));
 
@@ -554,8 +614,6 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url,  Http::H
 
   ENVOY_LOG(debug, "start sending data to hystrix dashboard on port {}" ,
       hystrix_data->callbacks_->connection()->localAddress()->asString());
-
-  //response.add("");  // needed?
   return rc;
 }
 
@@ -568,14 +626,14 @@ void AdminFilter::onComplete() {
   Http::Code code;
   if (path.find("/hystrix_event_stream") == std::string::npos)
   {
-	  filter_data_ = new FilterData();
-	  code = parent_.runCallback(path, *header_map, response, filter_data_);
+    filter_data_ = new FilterData();
+    code = parent_.runCallback(path, *header_map, response, filter_data_);
   }
   else
   {
-	  filter_data_ = new HystrixData(callbacks_);
-	  code = parent_.runCallback(path, *header_map, response, filter_data_);
-	  return;
+    filter_data_ = new HystrixData(callbacks_);
+    code = parent_.runCallback(path, *header_map, response, filter_data_);
+    return;
   }
 
   header_map->insertStatus().value(std::to_string(enumToInt(code)));
@@ -635,10 +693,11 @@ AdminImpl::AdminImpl(const std::string& access_log_path, const std::string& prof
           {"/server_info", "print server version/status information",
            MAKE_ADMIN_HANDLER(handlerServerInfo), false, false},
           {"/stats", "print server stats", MAKE_ADMIN_HANDLER(handlerStats), false, false},
-          {"/hystrix_event_stream", "send hystrix event stream",
-           MAKE_ADMIN_HANDLER(handlerHystrixEventStream), false, false},
           {"/listeners", "print listener addresses", MAKE_ADMIN_HANDLER(handlerListenerInfo), false,
-           false}},
+           false},
+          {"/runtime", "print runtime values", MAKE_ADMIN_HANDLER(handlerRuntime), false, false},
+          {"/hystrix_event_stream", "send hystrix event stream",
+           MAKE_ADMIN_HANDLER(handlerHystrixEventStream), false, false}},
       listener_stats_(
           Http::ConnectionManagerImpl::generateListenerStats("http.admin.", listener_scope)) {
 
@@ -675,9 +734,9 @@ void AdminImpl::createFilterChain(Http::FilterChainFactoryCallbacks& callbacks) 
   callbacks.addStreamDecoderFilter(Http::StreamDecoderFilterSharedPtr{new AdminFilter(*this)});
 }
 
-Http::Code AdminImpl::runCallback(const std::string& path_and_query, 
-                                  Http::HeaderMap& response_headers, Buffer::Instance& response, 
-				  FilterData* filter_data) {
+Http::Code AdminImpl::runCallback(const std::string& path_and_query,
+                                  Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                  FilterData* filter_data) {
   Http::Code code = Http::Code::OK;
   bool found_handler = false;
 
@@ -717,8 +776,7 @@ std::vector<const AdminImpl::UrlHandler*> AdminImpl::sortedHandlers() const {
 }
 
 Http::Code AdminImpl::handlerHelp(const std::string&, Http::HeaderMap&,
-                                  Buffer::Instance& response, 
-                                  FilterData*) {
+                                  Buffer::Instance& response, FilterData*) {
   response.add("admin commands are:\n");
 
   // Prefix order is used during searching, but for printing do them in alpha order.
@@ -729,8 +787,7 @@ Http::Code AdminImpl::handlerHelp(const std::string&, Http::HeaderMap&,
 }
 
 Http::Code AdminImpl::handlerAdminHome(const std::string&, Http::HeaderMap& response_headers,
-                                       Buffer::Instance& response,
-                                       FilterData*) {
+                                       Buffer::Instance& response, FilterData*) {
   response_headers.insertContentType().value().setReference(
       Http::Headers::get().ContentTypeValues.Html);
 
