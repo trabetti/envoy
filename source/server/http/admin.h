@@ -150,8 +150,8 @@ private:
   Http::Code handlerHelp(const std::string& path_and_query, Http::HeaderMap& response_headers,
                          Buffer::Instance& response, FilterData*);
   Http::Code handlerHotRestartVersion(const std::string& path_and_query,
-                                      Http::HeaderMap& response_headers,
-                                      Buffer::Instance& response, FilterData*);
+                                      Http::HeaderMap& response_headers, Buffer::Instance& response,
+                                      FilterData*);
   Http::Code handlerListenerInfo(const std::string& path_and_query,
                                  Http::HeaderMap& response_headers, Buffer::Instance& response,
                                  FilterData*);
@@ -171,8 +171,8 @@ private:
   Http::Code handlerRuntime(const std::string& path_and_query, Http::HeaderMap& response_headers,
                             Buffer::Instance& response, FilterData*);
   Http::Code handlerHystrixEventStream(const std::string& path_and_query,
-                                       Http::HeaderMap& response_headers,
-                                       Buffer::Instance&, FilterData* filter_data);
+                                       Http::HeaderMap& response_headers, Buffer::Instance&,
+                                       FilterData* filter_data);
 
   class AdminListener : public Network::ListenerConfig {
   public:
@@ -197,7 +197,6 @@ private:
     Http::ConnectionManagerListenerStats stats_;
   };
 
-
   Server::Instance& server_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
   const std::string profile_path_;
@@ -221,9 +220,7 @@ public:
   AdminFilter(AdminImpl& parent);
 
   // Http::StreamFilterBase
-  void onDestroy() override {
-    filter_data_->Destroy();
-  }
+  void onDestroy() override { filter_data_->Destroy(); }
 
   // Http::StreamDecoderFilter
   Http::FilterHeadersStatus decodeHeaders(Http::HeaderMap& response_headers,
@@ -278,26 +275,30 @@ private:
 };
 
 /**
- * Convert statistics from envoy format to hystrix format and prepare them and writes them to the appropriate socket
+ * Convert statistics from envoy format to hystrix format and prepare them and writes them to the
+ * appropriate socket
  */
-class HystrixHandler
-{
+class HystrixHandler {
 public:
   /**
    * Update counter and set values of upstream_rq statistics
-   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
+   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter
+   * (callback, timers, statistics)
    * @param server contains envoy statistics
    */
   static void updateHystrixRollingWindow(HystrixData* hystrix_data, Server::Instance& server);
   /**
-   * Builds a buffer of envoy statistics which will be sent to hystrix dashboard according to hystrix API
-   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
+   * Builds a buffer of envoy statistics which will be sent to hystrix dashboard according to
+   * hystrix API
+   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter
+   * (callback, timers, statistics)
    * @param server contains envoy statistics*
    */
   static void prepareAndSendHystrixStream(HystrixData* hystrix_data, Server::Instance& server);
   /**
    * Sends a keep alive (ping) message to hystrix dashboard
-   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter (callback, timers, statistics)
+   * @param hystrix_data is the data which is received in the hystrix handler from the admin filter
+   * (callback, timers, statistics)
    */
   static void sendKeepAlivePing(HystrixData* hystrix_data);
 };

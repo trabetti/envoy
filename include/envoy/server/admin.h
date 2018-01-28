@@ -9,6 +9,7 @@
 #include "envoy/http/filter.h"
 #include "envoy/http/header_map.h"
 #include "envoy/network/listen_socket.h"
+
 #include "common/stats/hystrix.h"
 
 namespace Envoy {
@@ -21,21 +22,21 @@ namespace Server {
  * done in the RouteConfigProviderManagerImpl constructor in source/common/router/rds_impl.cc.
  */
 #define MAKE_ADMIN_HANDLER(X)                                                                      \
-  [this](const std::string& url, Http::HeaderMap& response_headers,                                \
-         Buffer::Instance& data, Server::FilterData* filter_data) ->                \
-         Http::Code { return X(url, response_headers, data, filter_data); }
+  [this](const std::string& url, Http::HeaderMap& response_headers, Buffer::Instance& data,        \
+         Server::FilterData* filter_data) -> Http::Code {                                          \
+    return X(url, response_headers, data, filter_data);                                            \
+  }
 
 /**
  * This class is a base class for data which will be sent from admin filter to a handler
- * in admin impl. Each handler which needs to receive data from admin filter can inherit from FilterData
- * and build a class which contains the relevant data.
+ * in admin impl. Each handler which needs to receive data from admin filter can inherit from
+ * FilterData and build a class which contains the relevant data.
  */
-class FilterData
-{
+class FilterData {
 public:
-  FilterData() {};
-  virtual ~FilterData() {};
-  virtual void Destroy() {};
+  FilterData(){};
+  virtual ~FilterData(){};
+  virtual void Destroy(){};
 };
 
 /**
@@ -44,12 +45,11 @@ public:
  */
 class HystrixData : public FilterData {
 public:
-  HystrixData(Http::StreamDecoderFilterCallbacks* callbacks) :
-    stats_(new Stats::Hystrix(Stats::HYSTRIX_NUM_OF_BUCKETS)),
-           data_timer_(nullptr), ping_timer_(nullptr), callbacks_(callbacks) {}
-  virtual ~HystrixData() {};
-  void Destroy()
-  {
+  HystrixData(Http::StreamDecoderFilterCallbacks* callbacks)
+      : stats_(new Stats::Hystrix(Stats::HYSTRIX_NUM_OF_BUCKETS)), data_timer_(nullptr),
+        ping_timer_(nullptr), callbacks_(callbacks) {}
+  virtual ~HystrixData(){};
+  void Destroy() {
     if (data_timer_)
       data_timer_->disableTimer();
     if (ping_timer_)
@@ -60,7 +60,7 @@ public:
    * Hystrix data includes statistics for hystrix API,timer for build (and send) data and keep
    * alive messages and the handler's callback
    */
-  Stats::HystrixStatsPtr stats_;
+  Stats::HystrixPtr stats_;
   Event::TimerPtr data_timer_;
   Event::TimerPtr ping_timer_;
   Http::StreamDecoderFilterCallbacks* callbacks_{};
@@ -82,8 +82,8 @@ public:
    * @return Http::Code the response code.
    */
   typedef std::function<Http::Code(const std::string& url, Http::HeaderMap& response_headers,
-                                   Buffer::Instance& response,
-				   Server::FilterData* filter_data)>HandlerCb;
+                                   Buffer::Instance& response, Server::FilterData* filter_data)>
+      HandlerCb;
 
   /**
    * Add an admin handler.
