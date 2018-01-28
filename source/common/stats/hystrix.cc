@@ -1,4 +1,5 @@
-#include "common/stats/hystrix_stats.h"
+#include "common/stats/hystrix.h"
+
 #include <ctime>
 #include <chrono>
 #include <sstream>
@@ -8,17 +9,17 @@ namespace Envoy {
 namespace Stats {
 
 // add new value to rolling window, in place of oldest one
-void HystrixStats::pushNewValue(std::string key, int value){
+void Hystrix::pushNewValue(std::string key, int value){
   // create vector if do not exist
   if (rolling_stats_map_.find(key) == rolling_stats_map_.end()) {
-    rolling_stats_map_[key].resize(num_of_buckets_,0);
+    rolling_stats_map_[key].resize(num_of_buckets_,value);
+  } else {
+    rolling_stats_map_[key][current_index_] = value;
   }
-  rolling_stats_map_[key][current_index_] = value;
 }
 
-uint64_t HystrixStats::getRollingValue(std::string cluster_name, std::string stats) {
+uint64_t Hystrix::getRollingValue(std::string cluster_name, std::string stats) {
   std::string key = "cluster." + cluster_name + "." + stats;
-
   if (rolling_stats_map_.find(key) != rolling_stats_map_.end()) {
     // if the counter was reset, the result is negative
     // better return 0, will be back to normal once one rolling window passes
@@ -31,44 +32,33 @@ uint64_t HystrixStats::getRollingValue(std::string cluster_name, std::string sta
     else {
       return rolling_stats_map_[key][current_index_]-
           rolling_stats_map_[key][(current_index_+1)%num_of_buckets_];
-
     }
   }
-  else
+  else {
     return 0;
-}
-
-// to be removed
-void HystrixStats::printRollingWindow() {
-  for (auto it=rolling_stats_map_.begin(); it!=rolling_stats_map_.end(); ++it) {
-    std::cout << it->first<< " | ";
-    RollingStats rollingStats = it->second;
-    for (int i=0; i< num_of_buckets_; i++) {
-      std::cout << rollingStats[i] << " | ";
-    }
-    std::cout << std::endl;
   }
 }
 
-void HystrixStats::resetRollingWindow() {
+void Hystrix::resetRollingWindow() {
   rolling_stats_map_.clear();
 }
 
-void HystrixStats::addStringToStream(std::string key, std::string value, std::stringstream& info) {
+void Hystrix::addStringToStream(std::string key, std::string value, std::stringstream& info) {
   addInfoToStream(key, "\"" + value + "\"", info);
 }
 
-void HystrixStats::addIntToStream(std::string key, uint64_t value, std::stringstream& info) {
+void Hystrix::addIntToStream(std::string key, uint64_t value, std::stringstream& info) {
   addInfoToStream(key, std::to_string(value), info);
 }
 
-void HystrixStats::addInfoToStream(std::string key, std::string value, std::stringstream& info) {
-  if (!info.str().empty())
+void Hystrix::addInfoToStream(std::string key, std::string value, std::stringstream& info) {
+  if (!info.str().empty()) {
     info << ", ";
+  }
   info << "\"" + key + "\": " + value;
 }
 
-void HystrixStats::addHystrixCommand(std::stringstream& ss, std::string cluster_name,
+void Hystrix::addHystrixCommand(std::stringstream& ss, std::string cluster_name,
     uint64_t max_concurrent_requests, uint64_t reporting_hosts) {
   std::stringstream cluster_info;
   std::time_t currentTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -94,13 +84,11 @@ void HystrixStats::addHystrixCommand(std::stringstream& ss, std::string cluster_
                     - getRollingValue(cluster_name, "upstream_rq_timeout");
 
   double success = getRollingValue(cluster_name, "upstream_rq_2xx");
-
   double rejected = getRollingValue(cluster_name, "upstream_rq_pending_overflow");
 
   // should not take from upstream_rq_total since it is updated before its components,
   // leading to wrong results such as error percentage bigger than 100%
   double total = errors + timeouts + success + rejected;
-
   double error_rate = total == 0 ? 0 : ((errors + timeouts + rejected)/total)*100;
 
   addIntToStream("errorPercentage",                 error_rate, cluster_info);
@@ -152,12 +140,12 @@ void HystrixStats::addHystrixCommand(std::stringstream& ss, std::string cluster_
   addInfoToStream("propertyValue_requestLogEnabled",    "true",           cluster_info);
   addIntToStream("reportingHosts",                      reporting_hosts,  cluster_info);
   addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds",
-                 Stats::HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
+                 HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
 
   ss << "data: {" << cluster_info.str() << "}" << std::endl << std::endl;
 }
 
-void HystrixStats::addHystrixThreadPool(std::stringstream& ss, std::string cluster_name,
+void Hystrix::addHystrixThreadPool(std::stringstream& ss, std::string cluster_name,
     uint64_t queue_size, uint64_t reporting_hosts) {
   std::stringstream cluster_info;
 
@@ -167,9 +155,8 @@ void HystrixStats::addHystrixThreadPool(std::stringstream& ss, std::string clust
   addIntToStream("currentCompletedTaskCount",               0,            cluster_info);
   addIntToStream("propertyValue_queueSizeRejectionThreshold", queue_size, cluster_info);
   addStringToStream("type",                          "HystrixThreadPool", cluster_info);
-
   addIntToStream("reportingHosts",                       reporting_hosts, cluster_info);
-  addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds", Stats::HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
+  addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds", HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
   addStringToStream("name",                                 cluster_name, cluster_info);
   addIntToStream("currentLargestPoolSize",                  0,            cluster_info);
   addIntToStream("currentCorePoolSize",                     0,            cluster_info);
@@ -181,12 +168,11 @@ void HystrixStats::addHystrixThreadPool(std::stringstream& ss, std::string clust
   ss << "data: {" << cluster_info.str() << "}" << std::endl << std::endl;
 }
 
-void HystrixStats::getHystrixClusterStats(std::stringstream& ss, std::string cluster_name,
+void Hystrix::getClusterStats(std::stringstream& ss, std::string cluster_name,
     uint64_t max_concurrent_requests, uint64_t reporting_hosts) {
   addHystrixCommand(ss, cluster_name, max_concurrent_requests, reporting_hosts);
   addHystrixThreadPool(ss, cluster_name, max_concurrent_requests, reporting_hosts);
 }
-
 
 } // namespace Stats
 } // namespace Envoy
