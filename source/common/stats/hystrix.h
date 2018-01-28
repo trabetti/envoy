@@ -8,16 +8,23 @@ namespace Stats {
 typedef std::vector<uint64_t> RollingStats;
 typedef std::map<std::string, RollingStats> RollingStatsMap;
 
-// May want to make this configurable via config file
+// TODO(trabetti): May want to make this configurable via config file
+// TODO(trabetti) : move inside the class?
 static const uint64_t  HYSTRIX_NUM_OF_BUCKETS = 10;
 static const uint64_t  HYSTRIX_ROLLING_WINDOW_IN_MS = 10000;
 static const uint64_t  HYSTRIX_PING_INTERVAL_IN_MS = 3000; // what is good value?
 
+class RollingWindow{
+
+};
+
 //Consider implement the HystrixStats as a sink to have access to histograms data
-class HystrixStats {
+class Hystrix {
 
 public:
-  HystrixStats(int num_of_buckets) : current_index_(num_of_buckets-1), num_of_buckets_(num_of_buckets) {};
+
+  Hystrix(int num_of_buckets) :
+    current_index_(num_of_buckets-1), num_of_buckets_(num_of_buckets) {};
 
   /**
    * Add new value to top of rolling window, pushing out the oldest value
@@ -29,11 +36,10 @@ public:
    */
   void incCounter() { current_index_ = (current_index_ + 1)% num_of_buckets_;}
 
-
   /**
    * Generate the streams to be sent to hystrix dashboard
    */
-  void getHystrixClusterStats(std::stringstream& ss, std::string cluster_name,
+  void getClusterStats(std::stringstream& ss, std::string cluster_name,
       uint64_t max_concurrent_requests, uint64_t reporting_hosts);
 
 private:
@@ -41,11 +47,6 @@ private:
    * Get the statistic's value change over the rolling window time frame
    */
   uint64_t getRollingValue(std::string cluster_name, std::string stats);
-
-  /**
-   * for debug. should be removed
-   */
-  void printRollingWindow();
 
   /**
    * clear map
@@ -56,7 +57,6 @@ private:
    * format a string to match stream
    */
   void addStringToStream(std::string key, std::string value, std::stringstream& info);
-
 
   /**
    * format a uint64_t to match stream
@@ -81,12 +81,12 @@ private:
       uint64_t queue_size, uint64_t reporting_hosts);
 
   RollingStatsMap rolling_stats_map_;
+  std::map<std::string, uint64_t> num_of_hosts;
   int current_index_;
   int num_of_buckets_;
-
 };
 
-typedef std::unique_ptr<HystrixStats> HystrixStatsPtr;
+typedef std::unique_ptr<Hystrix> HystrixStatsPtr;
 
 } // namespace Stats
 } // namespace Envoy
