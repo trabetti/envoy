@@ -507,7 +507,7 @@ Http::Code AdminImpl::handlerCerts(const std::string&, Http::HeaderMap&,
 }
 
 Http::Code AdminImpl::handlerRuntime(const std::string& url, Http::HeaderMap& response_headers,
-                                     Buffer::Instance& response) {
+                                     Buffer::Instance& response, FilterData*) {
   Http::Code rc = Http::Code::OK;
   const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
   const auto& entries = server_.runtime().snapshot().getAll();
@@ -529,54 +529,6 @@ Http::Code AdminImpl::handlerRuntime(const std::string& url, Http::HeaderMap& re
     }
   }
   return rc;
-<<<<<<< HEAD
-=======
-}
-
-Http::Code AdminImpl::handlerHystrixEventStream(const std::string&, Http::HeaderMap&,
-                                                  Buffer::Instance&, FilterData* filter_data) {
-  Http::Code rc = Http::Code::OK;
-  // sending our own OK since dashboard doesn't work with Nosniff header
-  Http::HeaderMapPtr headers{
-    new Http::HeaderMapImpl{{Http::Headers::get().Status, std::to_string(enumToInt(rc))},
-      {Http::Headers::get().ContentType,  Http::Headers::get().ContentTypeValues.TextEventStream},
-      {Http::Headers::get().CacheControl, Http::Headers::get().CacheControlValues.NoCache},
-      {Http::Headers::get().Connection,   Http::Headers::get().ConnectionValues.Close},
-      {Http::Headers::get().AccessControlAllowHeaders,
-          Http::Headers::get().AccessControlAllowHeadersValue.AccessControlAllowHeadersHystrix},
-      {Http::Headers::get().AccessControlAllowOrigin, "*"},
-      {Http::Headers::get().NoChunks, "0"} // parameter to encodeHeaders
-    }};
-
-  HystrixData* hystrix_data = dynamic_cast<HystrixData*>(filter_data);
-  if (!hystrix_data) {
-	  return Http::Code::InternalServerError;
-  }
-
-  // send response
-  hystrix_data->callbacks_->encodeHeaders(std::move(headers), false);
-
-  // start streaming
-  hystrix_data->data_timer_ =
-		  hystrix_data->callbacks_->dispatcher().createTimer(
-          [this,hystrix_data]() -> void {
-    HystrixHandler::prepareAndSendHystrixStream(hystrix_data,server_); });
-  hystrix_data->data_timer_->enableTimer(
-      std::chrono::milliseconds(Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS));
-
-  // start keep alive ping
-  hystrix_data->ping_timer_ =
-	hystrix_data->callbacks_->dispatcher().createTimer(
-    [this,hystrix_data]() -> void { HystrixHandler::sendKeepAlivePing(hystrix_data); });
-
-  hystrix_data->ping_timer_->enableTimer(
-      std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS));
-
-  ENVOY_LOG(debug, "start sending data to hystrix dashboard on port {}" ,
-      hystrix_data->callbacks_->connection()->localAddress()->asString());
-
-  return rc;
->>>>>>> 7ad484b... code review comments
 }
 
 const std::vector<std::pair<std::string, Runtime::Snapshot::Entry>> AdminImpl::sortedRuntime(
@@ -622,7 +574,7 @@ std::string AdminImpl::runtimeAsJson(
   return strbuf.GetString();
 }
 
-Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Http::HeaderMap& ,
+Http::Code AdminImpl::handlerHystrixEventStream(const std::string&, Http::HeaderMap& ,
                                                   Buffer::Instance&, FilterData* filter_data) {
   Http::Code rc = Http::Code::OK;
 
