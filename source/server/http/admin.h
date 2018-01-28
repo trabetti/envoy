@@ -197,6 +197,7 @@ private:
     Http::ConnectionManagerListenerStats stats_;
   };
 
+
   Server::Instance& server_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
   const std::string profile_path_;
