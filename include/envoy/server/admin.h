@@ -9,7 +9,7 @@
 #include "envoy/http/filter.h"
 #include "envoy/http/header_map.h"
 #include "envoy/network/listen_socket.h"
-#include "common/stats/hystrix_stats.h"
+#include "common/stats/hystrix.h"
 
 namespace Envoy {
 namespace Server {
@@ -45,7 +45,7 @@ public:
 class HystrixData : public FilterData {
 public:
   HystrixData(Http::StreamDecoderFilterCallbacks* callbacks) :
-    stats_(new Stats::HystrixStats(Stats::HYSTRIX_NUM_OF_BUCKETS)),
+    stats_(new Stats::Hystrix(Stats::HYSTRIX_NUM_OF_BUCKETS)),
            data_timer_(nullptr), ping_timer_(nullptr), callbacks_(callbacks) {}
   virtual ~HystrixData() {};
   void Destroy()

@@ -507,7 +507,7 @@ Http::Code AdminImpl::handlerCerts(const std::string&, Http::HeaderMap&,
 }
 
 Http::Code AdminImpl::handlerRuntime(const std::string& url, Http::HeaderMap& response_headers,
-                                     Buffer::Instance& response) {
+                                     Buffer::Instance& response, FilterData*) {
   Http::Code rc = Http::Code::OK;
   const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
   const auto& entries = server_.runtime().snapshot().getAll();
@@ -574,7 +574,7 @@ std::string AdminImpl::runtimeAsJson(
   return strbuf.GetString();
 }
 
-Http::Code AdminImpl::handlerHystrixEventStream(const std::string& url, Http::HeaderMap& ,
+Http::Code AdminImpl::handlerHystrixEventStream(const std::string&, Http::HeaderMap& ,
                                                   Buffer::Instance&, FilterData* filter_data) {
   Http::Code rc = Http::Code::OK;
 
@@ -663,7 +663,7 @@ AdminImpl::NullRouteConfigProvider::NullRouteConfigProvider()
 AdminImpl::AdminImpl(const std::string& access_log_path, const std::string& profile_path,
                      const std::string& address_out_path,
                      Network::Address::InstanceConstSharedPtr address, Server::Instance& server,
-                     Stats::Scope& listener_scope)
+                     Stats::ScopePtr&& listener_scope)
     : server_(server), profile_path_(profile_path),
       socket_(new Network::TcpListenSocket(address, true)),
       stats_(Http::ConnectionManagerImpl::generateStats("http.admin.", server_.stats())),
@@ -698,8 +698,7 @@ AdminImpl::AdminImpl(const std::string& access_log_path, const std::string& prof
           {"/runtime", "print runtime values", MAKE_ADMIN_HANDLER(handlerRuntime), false, false},
           {"/hystrix_event_stream", "send hystrix event stream",
            MAKE_ADMIN_HANDLER(handlerHystrixEventStream), false, false}},
-      listener_stats_(
-          Http::ConnectionManagerImpl::generateListenerStats("http.admin.", listener_scope)) {
+      listener_(*this, std::move(listener_scope)) {
 
   if (!address_out_path.empty()) {
     std::ofstream address_out_file(address_out_path);
@@ -723,7 +722,7 @@ Http::ServerConnectionPtr AdminImpl::createCodec(Network::Connection& connection
       new Http::Http1::ServerConnectionImpl(connection, callbacks, Http::Http1Settings())};
 }
 
-bool AdminImpl::createFilterChain(Network::Connection& connection) {
+bool AdminImpl::createNetworkFilterChain(Network::Connection& connection) {
   connection.addReadFilter(Network::ReadFilterSharedPtr{new Http::ConnectionManagerImpl(
       *this, server_.drainManager(), server_.random(), server_.httpTracer(), server_.runtime(),
       server_.localInfo(), server_.clusterManager())});
@@ -856,7 +855,7 @@ void HystrixHandler::updateHystrixRollingWindow(HystrixData* hystrix_data,
   hystrix_data->stats_->incCounter();
 
   for (const Stats::CounterSharedPtr& counter : server.stats().counters()) {
-    // we save all upstream_rq stats. could be more specific.
+    // we save all upstream_rq stats.
     if (counter->name().find("upstream_rq_") != std::string::npos) {
       hystrix_data->stats_->pushNewValue(counter->name(), counter->value());
     }
@@ -866,30 +865,25 @@ void HystrixHandler::updateHystrixRollingWindow(HystrixData* hystrix_data,
 void HystrixHandler::prepareAndSendHystrixStream(HystrixData* hystrix_data,
     Server::Instance& server) {
   updateHystrixRollingWindow(hystrix_data,server);
-
   std::stringstream ss;
-
   for (auto& cluster : server.clusterManager().clusters()) {
-    hystrix_data->stats_-> getHystrixClusterStats(ss,
+    hystrix_data->stats_-> getClusterStats(ss,
         cluster.second.get().info()->name(),
         cluster.second.get().info()->resourceManager(
             Upstream::ResourcePriority::Default).pendingRequests().max(),
-            cluster.second.get().prioritySet().hostSetsPerPriority().size());
+            server.stats().gauge(
+                "cluster." + cluster.second.get().info()->name() + ".membership_total").value());
   }
-
   Buffer::OwnedImpl data;
   data.add(ss.str());
 
   // using write() since we are sending network level
-  // is there an alternative to the const_cast?
+  // TODO(trabetti): is there an alternative to the const_cast?
   (const_cast<Network::Connection*>((hystrix_data->callbacks_)->connection()))->write(data);
 
-  // TODO: move this outside to fixed place?
-  const auto ms = std::chrono::milliseconds(
-      Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS);
-
   // restart timer
-  hystrix_data->data_timer_->enableTimer(ms);
+  hystrix_data->data_timer_->enableTimer(std::chrono::milliseconds(
+      Stats::HYSTRIX_ROLLING_WINDOW_IN_MS/Stats::HYSTRIX_NUM_OF_BUCKETS));
 }
 
 void HystrixHandler::sendKeepAlivePing(HystrixData* hystrix_data) {
@@ -897,14 +891,12 @@ void HystrixHandler::sendKeepAlivePing(HystrixData* hystrix_data) {
   data.add(":\n\n");
 
   // using write() since we are sending network level
-  // is there an alternative to the const_cast?
+  // TODO(trabetti): is there an alternative to the const_cast?
   (const_cast<Network::Connection*>((hystrix_data->callbacks_)->connection()))->write(data);
 
-  // TODO: move this outside to fixed place?
-  const auto ms = std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS);
-
   // restart timer
-  hystrix_data->ping_timer_->enableTimer(ms);
+  hystrix_data->ping_timer_->enableTimer(std::chrono::milliseconds(
+      Stats::HYSTRIX_PING_INTERVAL_IN_MS));
 }
 
 } // namespace Server
