@@ -1,6 +1,6 @@
-#include <vector>
 #include <map>
 #include <memory>
+#include <vector>
 
 namespace Envoy {
 namespace Stats {
@@ -10,21 +10,16 @@ typedef std::map<std::string, RollingStats> RollingStatsMap;
 
 // TODO(trabetti): May want to make this configurable via config file
 // TODO(trabetti) : move inside the class?
-static const uint64_t  HYSTRIX_NUM_OF_BUCKETS = 10;
-static const uint64_t  HYSTRIX_ROLLING_WINDOW_IN_MS = 10000;
-static const uint64_t  HYSTRIX_PING_INTERVAL_IN_MS = 3000; // what is good value?
+static const uint64_t HYSTRIX_NUM_OF_BUCKETS = 10;
+static const uint64_t HYSTRIX_ROLLING_WINDOW_IN_MS = 10000;
+static const uint64_t HYSTRIX_PING_INTERVAL_IN_MS = 3000; // what is good value?
 
-class RollingWindow{
-
-};
-
-//Consider implement the HystrixStats as a sink to have access to histograms data
+// Consider implement the HystrixStats as a sink to have access to histograms data
 class Hystrix {
 
 public:
-
-  Hystrix(int num_of_buckets) :
-    current_index_(num_of_buckets-1), num_of_buckets_(num_of_buckets) {};
+  Hystrix(int num_of_buckets)
+      : current_index_(num_of_buckets - 1), num_of_buckets_(num_of_buckets){};
 
   /**
    * Add new value to top of rolling window, pushing out the oldest value
@@ -34,13 +29,13 @@ public:
   /**
    * increment pointer of next value to add to rolling window
    */
-  void incCounter() { current_index_ = (current_index_ + 1)% num_of_buckets_;}
+  void incCounter() { current_index_ = (current_index_ + 1) % num_of_buckets_; }
 
   /**
    * Generate the streams to be sent to hystrix dashboard
    */
   void getClusterStats(std::stringstream& ss, std::string cluster_name,
-      uint64_t max_concurrent_requests, uint64_t reporting_hosts);
+                       uint64_t max_concurrent_requests, uint64_t reporting_hosts);
 
 private:
   /**
@@ -72,21 +67,20 @@ private:
    * generate HystrixCommand stream
    */
   void addHystrixCommand(std::stringstream& ss, std::string cluster_name,
-      uint64_t max_concurrent_requests, uint64_t reporting_hosts);
+                         uint64_t max_concurrent_requests, uint64_t reporting_hosts);
 
   /**
    * generate HystrixThreadPool stream
    */
-  void addHystrixThreadPool(std::stringstream& ss, std::string cluster_name,
-      uint64_t queue_size, uint64_t reporting_hosts);
+  void addHystrixThreadPool(std::stringstream& ss, std::string cluster_name, uint64_t queue_size,
+                            uint64_t reporting_hosts);
 
   RollingStatsMap rolling_stats_map_;
-  std::map<std::string, uint64_t> num_of_hosts;
   int current_index_;
   int num_of_buckets_;
 };
 
-typedef std::unique_ptr<Hystrix> HystrixStatsPtr;
+typedef std::unique_ptr<Hystrix> HystrixPtr;
 
 } // namespace Stats
 } // namespace Envoy

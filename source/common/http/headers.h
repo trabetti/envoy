@@ -181,7 +181,8 @@ public:
   } CORSValues;
 
   struct {
-    const std::string AccessControlAllowHeadersHystrix{"Accept, Cache-Control, X-Requested-With, Last-Event-ID"};
+    const std::string AccessControlAllowHeadersHystrix{
+        "Accept, Cache-Control, X-Requested-With, Last-Event-ID"};
   } AccessControlAllowHeadersValue;
 
   struct {
