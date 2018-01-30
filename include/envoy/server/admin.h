@@ -23,7 +23,7 @@ namespace Server {
  */
 #define MAKE_ADMIN_HANDLER(X)                                                                      \
   [this](const std::string& url, Http::HeaderMap& response_headers, Buffer::Instance& data,        \
-         Server::HandlerInfo* handler_info) -> Http::Code {                                          \
+         Server::HandlerInfoSharedPtr handler_info) -> Http::Code {                                          \
     return X(url, response_headers, data, handler_info);                                            \
   }
 
@@ -38,6 +38,8 @@ public:
   virtual ~HandlerInfo(){};
   virtual void Destroy(){};
 };
+
+typedef std::shared_ptr<HandlerInfo> HandlerInfoSharedPtr;
 
 /**
  * This class contains data which will be sent from admin filter to a hystrix_event_stream handler
@@ -66,6 +68,8 @@ public:
   Http::StreamDecoderFilterCallbacks* callbacks_{};
 };
 
+typedef std::shared_ptr<HystrixHandlerInfo> HystrixHandlerInfoSharedPtr;
+
 /**
  * Global admin HTTP endpoint for the server.
  */
@@ -82,7 +86,7 @@ public:
    * @return Http::Code the response code.
    */
   typedef std::function<Http::Code(const std::string& url, Http::HeaderMap& response_headers,
-                                   Buffer::Instance& response, Server::HandlerInfo* handler_info)>
+                                   Buffer::Instance& response, Server::HandlerInfoSharedPtr handler_info)>
       HandlerCb;
 
   /**
