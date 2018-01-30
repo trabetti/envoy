@@ -8,6 +8,10 @@
 namespace Envoy {
 namespace Stats {
 
+const uint64_t Hystrix::DEFAULT_NUM_OF_BUCKETS;
+const uint64_t Hystrix::ROLLING_WINDOW_IN_MS;
+const uint64_t Hystrix::PING_INTERVAL_IN_MS; // what is good value?
+
 // add new value to rolling window, in place of oldest one
 void Hystrix::pushNewValue(std::string key, int value) {
   // create vector if do not exist
@@ -135,7 +139,7 @@ void Hystrix::addHystrixCommand(std::stringstream& ss, std::string cluster_name,
   addInfoToStream("propertyValue_requestLogEnabled", "true", cluster_info);
   addIntToStream("reportingHosts", reporting_hosts, cluster_info);
   addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds",
-                 HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
+                 ROLLING_WINDOW_IN_MS, cluster_info);
 
   ss << "data: {" << cluster_info.str() << "}" << std::endl << std::endl;
 }
@@ -152,7 +156,7 @@ void Hystrix::addHystrixThreadPool(std::stringstream& ss, std::string cluster_na
   addStringToStream("type", "HystrixThreadPool", cluster_info);
   addIntToStream("reportingHosts", reporting_hosts, cluster_info);
   addIntToStream("propertyValue_metricsRollingStatisticalWindowInMilliseconds",
-                 HYSTRIX_ROLLING_WINDOW_IN_MS, cluster_info);
+                 ROLLING_WINDOW_IN_MS, cluster_info);
   addStringToStream("name", cluster_name, cluster_info);
   addIntToStream("currentLargestPoolSize", 0, cluster_info);
   addIntToStream("currentCorePoolSize", 0, cluster_info);
