@@ -219,7 +219,7 @@ void AdminImpl::addCircuitSettings(const std::string& cluster_name, const std::s
 }
 
 Http::Code AdminImpl::handlerClusters(const std::string&, Http::HeaderMap&,
-                                      Buffer::Instance& response, FilterData*) {
+                                      Buffer::Instance& response, HandlerInfo*) {
   response.add(fmt::format("version_info::{}\n", server_.clusterManager().versionInfo()));
 
   for (auto& cluster : server_.clusterManager().clusters()) {
@@ -276,7 +276,7 @@ Http::Code AdminImpl::handlerClusters(const std::string&, Http::HeaderMap&,
 }
 
 Http::Code AdminImpl::handlerCpuProfiler(const std::string& url, Http::HeaderMap&,
-                                         Buffer::Instance& response, FilterData*) {
+                                         Buffer::Instance& response, HandlerInfo*) {
   Http::Utility::QueryParams query_params = Http::Utility::parseQueryString(url);
   if (query_params.size() != 1 || query_params.begin()->first != "enable" ||
       (query_params.begin()->second != "y" && query_params.begin()->second != "n")) {
@@ -300,27 +300,27 @@ Http::Code AdminImpl::handlerCpuProfiler(const std::string& url, Http::HeaderMap
 }
 
 Http::Code AdminImpl::handlerHealthcheckFail(const std::string&, Http::HeaderMap&,
-                                             Buffer::Instance& response, FilterData*) {
+                                             Buffer::Instance& response, HandlerInfo*) {
   server_.failHealthcheck(true);
   response.add("OK\n");
   return Http::Code::OK;
 }
 
 Http::Code AdminImpl::handlerHealthcheckOk(const std::string&, Http::HeaderMap&,
-                                           Buffer::Instance& response, FilterData*) {
+                                           Buffer::Instance& response, HandlerInfo*) {
   server_.failHealthcheck(false);
   response.add("OK\n");
   return Http::Code::OK;
 }
 
 Http::Code AdminImpl::handlerHotRestartVersion(const std::string&, Http::HeaderMap&,
-                                               Buffer::Instance& response, FilterData*) {
+                                               Buffer::Instance& response, HandlerInfo*) {
   response.add(server_.hotRestart().version());
   return Http::Code::OK;
 }
 
 Http::Code AdminImpl::handlerLogging(const std::string& url, Http::HeaderMap&,
-                                     Buffer::Instance& response, FilterData*) {
+                                     Buffer::Instance& response, HandlerInfo*) {
   Http::Utility::QueryParams query_params = Http::Utility::parseQueryString(url);
 
   Http::Code rc = Http::Code::OK;
@@ -346,7 +346,7 @@ Http::Code AdminImpl::handlerLogging(const std::string& url, Http::HeaderMap&,
 }
 
 Http::Code AdminImpl::handlerResetCounters(const std::string&, Http::HeaderMap&,
-                                           Buffer::Instance& response, FilterData*) {
+                                           Buffer::Instance& response, HandlerInfo*) {
   for (const Stats::CounterSharedPtr& counter : server_.stats().counters()) {
     counter->reset();
   }
@@ -356,7 +356,7 @@ Http::Code AdminImpl::handlerResetCounters(const std::string&, Http::HeaderMap&,
 }
 
 Http::Code AdminImpl::handlerServerInfo(const std::string&, Http::HeaderMap&,
-                                        Buffer::Instance& response, FilterData*) {
+                                        Buffer::Instance& response, HandlerInfo*) {
   time_t current_time = time(nullptr);
   response.add(fmt::format("envoy {} {} {} {} {}\n", VersionInfo::version(),
                            server_.healthCheckFailed() ? "draining" : "live",
@@ -367,7 +367,7 @@ Http::Code AdminImpl::handlerServerInfo(const std::string&, Http::HeaderMap&,
 }
 
 Http::Code AdminImpl::handlerStats(const std::string& url, Http::HeaderMap& response_headers,
-                                   Buffer::Instance& response, FilterData*) {
+                                   Buffer::Instance& response, HandlerInfo*) {
   // We currently don't support timers locally (only via statsd) so just group all the counters
   // and gauges together, alpha sort them, and spit them out.
   Http::Code rc = Http::Code::OK;
@@ -469,14 +469,14 @@ std::string AdminImpl::statsAsJson(const std::map<std::string, uint64_t>& all_st
 }
 
 Http::Code AdminImpl::handlerQuitQuitQuit(const std::string&, Http::HeaderMap&,
-                                          Buffer::Instance& response, FilterData*) {
+                                          Buffer::Instance& response, HandlerInfo*) {
   server_.shutdown();
   response.add("OK\n");
   return Http::Code::OK;
 }
 
 Http::Code AdminImpl::handlerListenerInfo(const std::string&, Http::HeaderMap& response_headers,
-                                          Buffer::Instance& response, FilterData*) {
+                                          Buffer::Instance& response, HandlerInfo*) {
   response_headers.insertContentType().value().setReference(
       Http::Headers::get().ContentTypeValues.Json);
   std::list<std::string> listeners;
@@ -488,7 +488,7 @@ Http::Code AdminImpl::handlerListenerInfo(const std::string&, Http::HeaderMap& r
 }
 
 Http::Code AdminImpl::handlerCerts(const std::string&, Http::HeaderMap&, Buffer::Instance& response,
-                                   FilterData*) {
+                                   HandlerInfo*) {
   // This set is used to track distinct certificates. We may have multiple listeners, upstreams, etc
   // using the same cert.
   std::unordered_set<std::string> context_info_set;
@@ -507,7 +507,7 @@ Http::Code AdminImpl::handlerCerts(const std::string&, Http::HeaderMap&, Buffer:
 }
 
 Http::Code AdminImpl::handlerRuntime(const std::string& url, Http::HeaderMap& response_headers,
-                                     Buffer::Instance& response, FilterData*) {
+                                     Buffer::Instance& response, HandlerInfo*) {
   Http::Code rc = Http::Code::OK;
   const Http::Utility::QueryParams params = Http::Utility::parseQueryString(url);
   const auto& entries = server_.runtime().snapshot().getAll();
@@ -576,7 +576,7 @@ std::string AdminImpl::runtimeAsJson(
 
 Http::Code AdminImpl::handlerHystrixEventStream(const std::string&,
                                                 Http::HeaderMap& response_headers,
-                                                Buffer::Instance&, FilterData* filter_data) {
+                                                Buffer::Instance&, HandlerInfo* handler_info) {
   response_headers.insertContentType().value().setReference(
       Http::Headers::get().ContentTypeValues.TextEventStream);
   response_headers.insertCacheControl().value().setReference(
@@ -589,28 +589,28 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string&,
       Http::Headers::get().AccessControlAllowOriginValue.All);
   response_headers.insertNoChunks().value().setReference("0");
 
-  HystrixData* hystrix_data = dynamic_cast<HystrixData*>(filter_data);
-  if (!hystrix_data) {
+  HystrixHandlerInfo* hystrix_handler_info = dynamic_cast<HystrixHandlerInfo*>(handler_info);
+  if (!hystrix_handler_info) {
     return Http::Code::InternalServerError;
   }
 
   // start streaming
-  hystrix_data->data_timer_ =
-      hystrix_data->callbacks_->dispatcher().createTimer([this, hystrix_data]() -> void {
-        HystrixHandler::prepareAndSendHystrixStream(hystrix_data, server_);
+  hystrix_handler_info->data_timer_ =
+      hystrix_handler_info->callbacks_->dispatcher().createTimer([this, hystrix_handler_info]() -> void {
+        HystrixHandler::prepareAndSendHystrixStream(hystrix_handler_info, server_);
       });
-  hystrix_data->data_timer_->enableTimer(std::chrono::milliseconds(
-      Stats::HYSTRIX_ROLLING_WINDOW_IN_MS / Stats::HYSTRIX_NUM_OF_BUCKETS));
+  hystrix_handler_info->data_timer_->enableTimer(std::chrono::milliseconds(
+      Stats::Hystrix::GetRollingWindowIntervalInMs()));
 
   // start keep alive ping
-  hystrix_data->ping_timer_ = hystrix_data->callbacks_->dispatcher().createTimer(
-      [this, hystrix_data]() -> void { HystrixHandler::sendKeepAlivePing(hystrix_data); });
+  hystrix_handler_info->ping_timer_ = hystrix_handler_info->callbacks_->dispatcher().createTimer(
+      [this, hystrix_handler_info]() -> void { HystrixHandler::sendKeepAlivePing(hystrix_handler_info); });
 
-  hystrix_data->ping_timer_->enableTimer(
-      std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS));
+  hystrix_handler_info->ping_timer_->enableTimer(
+      std::chrono::milliseconds(Stats::Hystrix::GetPingIntervalInMs()));
 
   ENVOY_LOG(debug, "start sending data to hystrix dashboard on port {}",
-            hystrix_data->callbacks_->connection()->localAddress()->asString());
+            hystrix_handler_info->callbacks_->connection()->localAddress()->asString());
   return Http::Code::OK;
 }
 
@@ -624,11 +624,11 @@ void AdminFilter::onComplete() {
   bool end_stream = true;
 
   if (path.find("/hystrix_event_stream") == std::string::npos) {
-    filter_data_ = new FilterData();
-    code = parent_.runCallback(path, *header_map, response, filter_data_);
+    handler_info_ = new HandlerInfo();
+    code = parent_.runCallback(path, *header_map, response, handler_info_);
   } else {
-    filter_data_ = new HystrixData(callbacks_);
-    code = parent_.runCallback(path, *header_map, response, filter_data_);
+    handler_info_ = new HystrixHandlerInfo(callbacks_);
+    code = parent_.runCallback(path, *header_map, response, handler_info_);
     end_stream = false;
   }
 
@@ -731,7 +731,7 @@ void AdminImpl::createFilterChain(Http::FilterChainFactoryCallbacks& callbacks) 
 
 Http::Code AdminImpl::runCallback(const std::string& path_and_query,
                                   Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                  FilterData* filter_data) {
+                                  HandlerInfo* handler_info) {
   Http::Code code = Http::Code::OK;
   bool found_handler = false;
 
@@ -742,7 +742,7 @@ Http::Code AdminImpl::runCallback(const std::string& path_and_query,
 
   for (const UrlHandler& handler : handlers_) {
     if (path_and_query.compare(0, query_index, handler.prefix_) == 0) {
-      code = handler.handler_(path_and_query, response_headers, response, filter_data);
+      code = handler.handler_(path_and_query, response_headers, response, handler_info);
       found_handler = true;
       break;
     }
@@ -752,7 +752,7 @@ Http::Code AdminImpl::runCallback(const std::string& path_and_query,
     // Extra space is emitted below to have "invalid path." be a separate sentence in the
     // 404 output from "admin commands are:" in handlerHelp.
     response.add("invalid path. ");
-    handlerHelp(path_and_query, response_headers, response, filter_data);
+    handlerHelp(path_and_query, response_headers, response, handler_info);
     code = Http::Code::NotFound;
   }
 
@@ -771,7 +771,7 @@ std::vector<const AdminImpl::UrlHandler*> AdminImpl::sortedHandlers() const {
 }
 
 Http::Code AdminImpl::handlerHelp(const std::string&, Http::HeaderMap&, Buffer::Instance& response,
-                                  FilterData*) {
+                                  HandlerInfo*) {
   response.add("admin commands are:\n");
 
   // Prefix order is used during searching, but for printing do them in alpha order.
@@ -782,7 +782,7 @@ Http::Code AdminImpl::handlerHelp(const std::string&, Http::HeaderMap&, Buffer::
 }
 
 Http::Code AdminImpl::handlerAdminHome(const std::string&, Http::HeaderMap& response_headers,
-                                       Buffer::Instance& response, FilterData*) {
+                                       Buffer::Instance& response, HandlerInfo*) {
   response_headers.insertContentType().value().setReference(
       Http::Headers::get().ContentTypeValues.Html);
 
@@ -846,24 +846,24 @@ bool AdminImpl::removeHandler(const std::string& prefix) {
   return false;
 }
 
-void HystrixHandler::updateHystrixRollingWindow(HystrixData* hystrix_data,
+void HystrixHandler::updateHystrixRollingWindow(HystrixHandlerInfo* hystrix_handler_info,
                                                 Server::Instance& server) {
-  hystrix_data->stats_->incCounter();
+  hystrix_handler_info->stats_->incCounter();
 
   for (const Stats::CounterSharedPtr& counter : server.stats().counters()) {
     // we save all upstream_rq stats.
     if (counter->name().find("upstream_rq_") != std::string::npos) {
-      hystrix_data->stats_->pushNewValue(counter->name(), counter->value());
+      hystrix_handler_info->stats_->pushNewValue(counter->name(), counter->value());
     }
   }
 }
 
-void HystrixHandler::prepareAndSendHystrixStream(HystrixData* hystrix_data,
+void HystrixHandler::prepareAndSendHystrixStream(HystrixHandlerInfo* hystrix_handler_info,
                                                  Server::Instance& server) {
-  updateHystrixRollingWindow(hystrix_data, server);
+  updateHystrixRollingWindow(hystrix_handler_info, server);
   std::stringstream ss;
   for (auto& cluster : server.clusterManager().clusters()) {
-    hystrix_data->stats_->getClusterStats(
+    hystrix_handler_info->stats_->getClusterStats(
         ss, cluster.second.get().info()->name(),
         cluster.second.get()
             .info()
@@ -879,24 +879,24 @@ void HystrixHandler::prepareAndSendHystrixStream(HystrixData* hystrix_data,
 
   // using write() since we are sending network level
   // TODO(trabetti): is there an alternative to the const_cast?
-  (const_cast<Network::Connection*>((hystrix_data->callbacks_)->connection()))->write(data);
+  (const_cast<Network::Connection*>((hystrix_handler_info->callbacks_)->connection()))->write(data);
 
   // restart timer
-  hystrix_data->data_timer_->enableTimer(std::chrono::milliseconds(
-      Stats::HYSTRIX_ROLLING_WINDOW_IN_MS / Stats::HYSTRIX_NUM_OF_BUCKETS));
+  hystrix_handler_info->data_timer_->enableTimer(std::chrono::milliseconds(
+      Stats::Hystrix::GetRollingWindowIntervalInMs()));
 }
 
-void HystrixHandler::sendKeepAlivePing(HystrixData* hystrix_data) {
+void HystrixHandler::sendKeepAlivePing(HystrixHandlerInfo* hystrix_handler_info) {
   Buffer::OwnedImpl data;
   data.add(":\n\n");
 
   // using write() since we are sending network level
   // TODO(trabetti): is there an alternative to the const_cast?
-  (const_cast<Network::Connection*>((hystrix_data->callbacks_)->connection()))->write(data);
+  (const_cast<Network::Connection*>((hystrix_handler_info->callbacks_)->connection()))->write(data);
 
   // restart timer
-  hystrix_data->ping_timer_->enableTimer(
-      std::chrono::milliseconds(Stats::HYSTRIX_PING_INTERVAL_IN_MS));
+  hystrix_handler_info->ping_timer_->enableTimer(
+      std::chrono::milliseconds(Stats::Hystrix::GetPingIntervalInMs()));
 }
 
 } // namespace Server

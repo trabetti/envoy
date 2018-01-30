@@ -8,16 +8,13 @@ namespace Stats {
 typedef std::vector<uint64_t> RollingStats;
 typedef std::map<std::string, RollingStats> RollingStatsMap;
 
-// TODO(trabetti): May want to make this configurable via config file
-// TODO(trabetti) : move inside the class?
-static const uint64_t HYSTRIX_NUM_OF_BUCKETS = 10;
-static const uint64_t HYSTRIX_ROLLING_WINDOW_IN_MS = 10000;
-static const uint64_t HYSTRIX_PING_INTERVAL_IN_MS = 3000; // what is good value?
-
 // Consider implement the HystrixStats as a sink to have access to histograms data
 class Hystrix {
 
 public:
+  Hystrix()
+      : current_index_(DEFAULT_NUM_OF_BUCKETS - 1), num_of_buckets_(DEFAULT_NUM_OF_BUCKETS){};
+
   Hystrix(int num_of_buckets)
       : current_index_(num_of_buckets - 1), num_of_buckets_(num_of_buckets){};
 
@@ -36,6 +33,9 @@ public:
    */
   void getClusterStats(std::stringstream& ss, std::string cluster_name,
                        uint64_t max_concurrent_requests, uint64_t reporting_hosts);
+
+  static uint64_t GetRollingWindowIntervalInMs() { return static_cast<const uint64_t>(ROLLING_WINDOW_IN_MS / DEFAULT_NUM_OF_BUCKETS); }
+  static uint64_t GetPingIntervalInMs() { return PING_INTERVAL_IN_MS; }
 
 private:
   /**
@@ -78,6 +78,10 @@ private:
   RollingStatsMap rolling_stats_map_;
   int current_index_;
   int num_of_buckets_;
+  // TODO(trabetti): May want to make this configurable via config file
+  static const uint64_t DEFAULT_NUM_OF_BUCKETS = 10;
+  static const uint64_t ROLLING_WINDOW_IN_MS = 10000;
+  static const uint64_t PING_INTERVAL_IN_MS = 3000; // what is good value?
 };
 
 typedef std::unique_ptr<Hystrix> HystrixPtr;

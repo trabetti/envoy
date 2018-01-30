@@ -23,19 +23,19 @@ namespace Server {
  */
 #define MAKE_ADMIN_HANDLER(X)                                                                      \
   [this](const std::string& url, Http::HeaderMap& response_headers, Buffer::Instance& data,        \
-         Server::FilterData* filter_data) -> Http::Code {                                          \
-    return X(url, response_headers, data, filter_data);                                            \
+         Server::HandlerInfo* handler_info) -> Http::Code {                                          \
+    return X(url, response_headers, data, handler_info);                                            \
   }
 
 /**
  * This class is a base class for data which will be sent from admin filter to a handler
  * in admin impl. Each handler which needs to receive data from admin filter can inherit from
- * FilterData and build a class which contains the relevant data.
+ * HandlerInfo and build a class which contains the relevant data.
  */
-class FilterData {
+class HandlerInfo {
 public:
-  FilterData(){};
-  virtual ~FilterData(){};
+  HandlerInfo(){};
+  virtual ~HandlerInfo(){};
   virtual void Destroy(){};
 };
 
@@ -43,12 +43,12 @@ public:
  * This class contains data which will be sent from admin filter to a hystrix_event_stream handler
  * and build a class which contains the relevant data.
  */
-class HystrixData : public FilterData {
+class HystrixHandlerInfo : public HandlerInfo {
 public:
-  HystrixData(Http::StreamDecoderFilterCallbacks* callbacks)
-      : stats_(new Stats::Hystrix(Stats::HYSTRIX_NUM_OF_BUCKETS)), data_timer_(nullptr),
+  HystrixHandlerInfo(Http::StreamDecoderFilterCallbacks* callbacks)
+      : stats_(new Stats::Hystrix()), data_timer_(nullptr),
         ping_timer_(nullptr), callbacks_(callbacks) {}
-  virtual ~HystrixData(){};
+  virtual ~HystrixHandlerInfo(){};
   void Destroy() {
     if (data_timer_)
       data_timer_->disableTimer();
@@ -82,7 +82,7 @@ public:
    * @return Http::Code the response code.
    */
   typedef std::function<Http::Code(const std::string& url, Http::HeaderMap& response_headers,
-                                   Buffer::Instance& response, Server::FilterData* filter_data)>
+                                   Buffer::Instance& response, Server::HandlerInfo* handler_info)>
       HandlerCb;
 
   /**
