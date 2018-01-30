@@ -98,7 +98,7 @@ INSTANTIATE_TEST_CASE_P(IpVersions, AdminInstanceTest,
 TEST_P(AdminInstanceTest, AdminProfiler) {
   Buffer::OwnedImpl data;
   Http::HeaderMapImpl header_map;
-  HandlerInfo* handler_info = new HandlerInfo();
+  HandlerInfoSharedPtr handler_info(new HandlerInfo);
   EXPECT_EQ(Http::Code::OK,
             admin_.runCallback("/cpuprofiler?enable=y", header_map, data, handler_info));
   EXPECT_TRUE(Profiler::Cpu::profilerEnabled());
@@ -116,7 +116,7 @@ TEST_P(AdminInstanceTest, AdminBadProfiler) {
                                    "", Network::Test::getCanonicalLoopbackAddress(GetParam()),
                                    server_, listener_scope_.createScope("listener.admin."));
   Http::HeaderMapImpl header_map;
-  HandlerInfo* handler_info = new HandlerInfo();
+  HandlerInfoSharedPtr handler_info(new HandlerInfo);
   admin_bad_profile_path.runCallback("/cpuprofiler?enable=y", header_map, data, handler_info);
   EXPECT_FALSE(Profiler::Cpu::profilerEnabled());
 }
@@ -138,13 +138,13 @@ TEST_P(AdminInstanceTest, AdminBadAddressOutPath) {
 
 TEST_P(AdminInstanceTest, CustomHandler) {
   auto callback = [&](const std::string&, Http::HeaderMap&, Buffer::Instance&,
-                      HandlerInfo*) -> Http::Code { return Http::Code::Accepted; };
+                      HandlerInfoSharedPtr) -> Http::Code { return Http::Code::Accepted; };
 
   // Test removable handler.
   EXPECT_TRUE(admin_.addHandler("/foo/bar", "hello", callback, true, false));
   Http::HeaderMapImpl header_map;
   Buffer::OwnedImpl response;
-  HandlerInfo* handler_info = new HandlerInfo();
+  HandlerInfoSharedPtr handler_info(new HandlerInfo);
 
   EXPECT_EQ(Http::Code::Accepted,
             admin_.runCallback("/foo/bar", header_map, response, handler_info));
@@ -171,22 +171,22 @@ TEST_P(AdminInstanceTest, CustomHandler) {
 
 TEST_P(AdminInstanceTest, RejectHandlerWithXss) {
   auto callback = [&](const std::string&, Http::HeaderMap&, Buffer::Instance&,
-                      HandlerInfo*) -> Http::Code { return Http::Code::Accepted; };
+                      HandlerInfoSharedPtr) -> Http::Code { return Http::Code::Accepted; };
   EXPECT_FALSE(
       admin_.addHandler("/foo<script>alert('hi')</script>", "hello", callback, true, false));
 }
 
 TEST_P(AdminInstanceTest, RejectHandlerWithEmbeddedQuery) {
   auto callback = [&](const std::string&, Http::HeaderMap&, Buffer::Instance&,
-                      HandlerInfo*) -> Http::Code { return Http::Code::Accepted; };
+                      HandlerInfoSharedPtr) -> Http::Code { return Http::Code::Accepted; };
   EXPECT_FALSE(admin_.addHandler("/bar?queryShouldNotBeInPrefix", "hello", callback, true, false));
 }
 
 TEST_P(AdminInstanceTest, EscapeHelpTextWithPunctuation) {
   auto callback = [&](const std::string&, Http::HeaderMap&, Buffer::Instance&,
-                      HandlerInfo*) -> Http::Code { return Http::Code::Accepted; };
+                      HandlerInfoSharedPtr) -> Http::Code { return Http::Code::Accepted; };
 
-  HandlerInfo* handler_info = new HandlerInfo();
+  HandlerInfoSharedPtr handler_info(new HandlerInfo);
 
   // It's OK to have help text with HTML characters in it, but when we render the home
   // page they need to be escaped.
@@ -206,7 +206,7 @@ TEST_P(AdminInstanceTest, EscapeHelpTextWithPunctuation) {
 TEST_P(AdminInstanceTest, HelpUsesFormForMutations) {
   Http::HeaderMapImpl header_map;
   Buffer::OwnedImpl response;
-  HandlerInfo* handler_info = new HandlerInfo();
+  HandlerInfoSharedPtr handler_info(new HandlerInfo);
   EXPECT_EQ(Http::Code::OK, admin_.runCallback("/", header_map, response, handler_info));
   const std::string logging_action = "<form action='/logging' method='post'";
   const std::string stats_href = "<a href='/stats'";
@@ -222,7 +222,7 @@ TEST_P(AdminInstanceTest, Runtime) {
       {"string_key", {"foo", {}}}, {"int_key", {"1", {1}}}, {"other_key", {"bar", {}}}};
   Runtime::MockSnapshot snapshot;
   Runtime::MockLoader loader;
-  HandlerInfo* handler_info = new HandlerInfo();
+  HandlerInfoSharedPtr handler_info(new HandlerInfo);
 
   EXPECT_CALL(snapshot, getAll()).WillRepeatedly(testing::ReturnRef(entries));
   EXPECT_CALL(loader, snapshot()).WillRepeatedly(testing::ReturnPointee(&snapshot));
@@ -240,7 +240,7 @@ TEST_P(AdminInstanceTest, RuntimeJSON) {
       {"string_key", {"foo", {}}}, {"int_key", {"1", {1}}}, {"other_key", {"bar", {}}}};
   Runtime::MockSnapshot snapshot;
   Runtime::MockLoader loader;
-  HandlerInfo* handler_info = new HandlerInfo();
+  HandlerInfoSharedPtr handler_info(new HandlerInfo);
 
   EXPECT_CALL(snapshot, getAll()).WillRepeatedly(testing::ReturnRef(entries));
   EXPECT_CALL(loader, snapshot()).WillRepeatedly(testing::ReturnPointee(&snapshot));
@@ -276,7 +276,7 @@ TEST_P(AdminInstanceTest, RuntimeBadFormat) {
   std::unordered_map<std::string, const Runtime::Snapshot::Entry> entries;
   Runtime::MockSnapshot snapshot;
   Runtime::MockLoader loader;
-  HandlerInfo* handler_info = new HandlerInfo();
+  HandlerInfoSharedPtr handler_info(new HandlerInfo);
 
   EXPECT_CALL(snapshot, getAll()).WillRepeatedly(testing::ReturnRef(entries));
   EXPECT_CALL(loader, snapshot()).WillRepeatedly(testing::ReturnPointee(&snapshot));
