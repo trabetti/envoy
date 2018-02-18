@@ -6,8 +6,11 @@
 #include "envoy/buffer/buffer.h"
 #include "envoy/common/pure.h"
 #include "envoy/http/codes.h"
+#include "envoy/http/filter.h"
 #include "envoy/http/header_map.h"
 #include "envoy/network/listen_socket.h"
+
+#include "common/stats/hystrix.h"
 
 namespace Envoy {
 namespace Server {
@@ -19,8 +22,53 @@ namespace Server {
  * done in the RouteConfigProviderManagerImpl constructor in source/common/router/rds_impl.cc.
  */
 #define MAKE_ADMIN_HANDLER(X)                                                                      \
-  [this](const std::string& url, Http::HeaderMap& response_headers,                                \
-         Buffer::Instance& data) -> Http::Code { return X(url, response_headers, data); }
+  [this](const std::string& url, Http::HeaderMap& response_headers, Buffer::Instance& data,        \
+         Server::HandlerInfoSharedPtr handler_info) -> Http::Code {                                          \
+    return X(url, response_headers, data, handler_info);                                            \
+  }
+
+/**
+ * This class is a base class for data which will be sent from admin filter to a handler
+ * in admin impl. Each handler which needs to receive data from admin filter can inherit from
+ * HandlerInfo and build a class which contains the relevant data.
+ */
+class HandlerInfo {
+public:
+  HandlerInfo(){};
+  virtual ~HandlerInfo(){};
+  virtual void Destroy(){};
+};
+
+typedef std::shared_ptr<HandlerInfo> HandlerInfoSharedPtr;
+
+/**
+ * This class contains data which will be sent from admin filter to a hystrix_event_stream handler
+ * and build a class which contains the relevant data.
+ */
+class HystrixHandlerInfo : public HandlerInfo {
+public:
+  HystrixHandlerInfo(Http::StreamDecoderFilterCallbacks* callbacks)
+      : stats_(new Stats::Hystrix()), data_timer_(nullptr),
+        ping_timer_(nullptr), callbacks_(callbacks) {}
+  virtual ~HystrixHandlerInfo(){};
+  void Destroy() {
+    if (data_timer_)
+      data_timer_->disableTimer();
+    if (ping_timer_)
+      ping_timer_->disableTimer();
+  }
+
+  /**
+   * Hystrix data includes statistics for hystrix API,timer for build (and send) data and keep
+   * alive messages and the handler's callback
+   */
+  Stats::HystrixPtr stats_;
+  Event::TimerPtr data_timer_;
+  Event::TimerPtr ping_timer_;
+  Http::StreamDecoderFilterCallbacks* callbacks_{};
+};
+
+typedef std::shared_ptr<HystrixHandlerInfo> HystrixHandlerInfoSharedPtr;
 
 /**
  * Global admin HTTP endpoint for the server.
@@ -38,7 +86,7 @@ public:
    * @return Http::Code the response code.
    */
   typedef std::function<Http::Code(const std::string& url, Http::HeaderMap& response_headers,
-                                   Buffer::Instance& response)>
+                                   Buffer::Instance& response, Server::HandlerInfoSharedPtr handler_info)>
       HandlerCb;
 
   /**

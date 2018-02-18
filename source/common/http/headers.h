@@ -65,6 +65,7 @@ public:
   const LowerCaseString KeepAlive{"keep-alive"};
   const LowerCaseString Location{"location"};
   const LowerCaseString Method{":method"};
+  const LowerCaseString NoChunks{":no-chunks"};
   const LowerCaseString Origin{"origin"};
   const LowerCaseString OtSpanContext{"x-ot-span-context"};
   const LowerCaseString Path{":path"};
@@ -96,11 +97,13 @@ public:
   } UpgradeValues;
 
   struct {
+    const std::string NoCache{"no-cache"};
     const std::string NoCacheMaxAge0{"no-cache, max-age=0"};
   } CacheControlValues;
 
   struct {
     const std::string Text{"text/plain"};
+    const std::string TextEventStream{"text/event-stream"};
     const std::string TextUtf8{"text/plain; charset=UTF-8"}; // TODO(jmarantz): fold this into Text
     const std::string Html{"text/html; charset=UTF-8"};
     const std::string Grpc{"application/grpc"};
@@ -176,6 +179,15 @@ public:
   struct {
     const std::string True{"true"};
   } CORSValues;
+
+  struct {
+    const std::string AccessControlAllowHeadersHystrix{
+        "Accept, Cache-Control, X-Requested-With, Last-Event-ID"};
+  } AccessControlAllowHeadersValue;
+
+  struct {
+    const std::string All{"*"};
+  } AccessControlAllowOriginValue;
 };
 
 typedef ConstSingleton<HeaderValues> Headers;
