@@ -59,7 +59,7 @@ public:
   }
 
   /**
-   * Hystrix data includes statistics for hystrix API,timer for build (and send) data and keep
+   * HystrixHandlerInfo includes statistics for hystrix API, timer for build (and send) data and keep
    * alive messages and the handler's callback
    */
   Stats::HystrixPtr stats_;
