@@ -37,16 +37,16 @@ public:
   static uint64_t GetRollingWindowIntervalInMs() { return static_cast<const uint64_t>(ROLLING_WINDOW_IN_MS / DEFAULT_NUM_OF_BUCKETS); }
   static uint64_t GetPingIntervalInMs() { return PING_INTERVAL_IN_MS; }
 
+  /**
+   * clear map
+   */
+  void resetRollingWindow();
+
 private:
   /**
    * Get the statistic's value change over the rolling window time frame
    */
   uint64_t getRollingValue(std::string cluster_name, std::string stats);
-
-  /**
-   * clear map
-   */
-  void resetRollingWindow();
 
   /**
    * format a string to match stream
