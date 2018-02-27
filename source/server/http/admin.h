@@ -41,7 +41,7 @@ public:
             Server::Instance& server, Stats::ScopePtr&& listener_scope);
 
   Http::Code runCallback(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                         Buffer::Instance& response, HandlerInfoSharedPtr handler_info);
+                         Buffer::Instance& response, HandlerInfo& handler_info);
   const Network::ListenSocket& socket() override { return *socket_; }
   Network::ListenSocket& mutable_socket() { return *socket_; }
   Network::ListenerConfig& listener() { return listener_; }
@@ -133,46 +133,46 @@ private:
    * URL handlers.
    */
   Http::Code handlerAdminHome(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                              Buffer::Instance& response, HandlerInfoSharedPtr);
+                              Buffer::Instance& response, HandlerInfo&);
   Http::Code handlerCerts(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                          Buffer::Instance& response, HandlerInfoSharedPtr);
+                          Buffer::Instance& response, HandlerInfo&);
   Http::Code handlerClusters(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                             Buffer::Instance& response, HandlerInfoSharedPtr);
+                             Buffer::Instance& response, HandlerInfo&);
   Http::Code handlerCpuProfiler(const std::string& path_and_query,
                                 Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                HandlerInfoSharedPtr);
+                                HandlerInfo&);
   Http::Code handlerHealthcheckFail(const std::string& path_and_query,
                                     Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                    HandlerInfoSharedPtr);
+                                    HandlerInfo&);
   Http::Code handlerHealthcheckOk(const std::string& path_and_query,
                                   Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                  HandlerInfoSharedPtr);
+                                  HandlerInfo&);
   Http::Code handlerHelp(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                         Buffer::Instance& response, HandlerInfoSharedPtr);
+                         Buffer::Instance& response, HandlerInfo&);
   Http::Code handlerHotRestartVersion(const std::string& path_and_query,
                                       Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                      HandlerInfoSharedPtr);
+                                      HandlerInfo&);
   Http::Code handlerListenerInfo(const std::string& path_and_query,
                                  Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                 HandlerInfoSharedPtr);
+                                 HandlerInfo&);
   Http::Code handlerLogging(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                            Buffer::Instance& response, HandlerInfoSharedPtr);
+                            Buffer::Instance& response, HandlerInfo&);
   Http::Code handlerMain(const std::string& path, Buffer::Instance& response);
   Http::Code handlerQuitQuitQuit(const std::string& path_and_query,
                                  Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                 HandlerInfoSharedPtr);
+                                 HandlerInfo&);
   Http::Code handlerResetCounters(const std::string& path_and_query,
                                   Http::HeaderMap& response_headers, Buffer::Instance& response,
-                                  HandlerInfoSharedPtr);
+                                  HandlerInfo&);
   Http::Code handlerServerInfo(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                               Buffer::Instance& response, HandlerInfoSharedPtr);
+                               Buffer::Instance& response, HandlerInfo&);
   Http::Code handlerStats(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                          Buffer::Instance& response, HandlerInfoSharedPtr);
+                          Buffer::Instance& response, HandlerInfo&);
   Http::Code handlerRuntime(const std::string& path_and_query, Http::HeaderMap& response_headers,
-                            Buffer::Instance& response, HandlerInfoSharedPtr);
+                            Buffer::Instance& response, HandlerInfo&);
   Http::Code handlerHystrixEventStream(const std::string& path_and_query,
                                        Http::HeaderMap& response_headers, Buffer::Instance&,
-                                       HandlerInfoSharedPtr handler_info);
+									   HandlerInfo& handler_info);
 
   class AdminListener : public Network::ListenerConfig {
   public:
@@ -286,7 +286,7 @@ public:
    * (callback, timers, statistics)
    * @param server contains envoy statistics
    */
-  static void updateHystrixRollingWindow(HystrixHandlerInfoSharedPtr hystrix_handler_info, Server::Instance& server);
+  static void updateHystrixRollingWindow(HystrixHandlerInfo* hystrix_handler_info, Server::Instance& server);
   /**
    * Builds a buffer of envoy statistics which will be sent to hystrix dashboard according to
    * hystrix API
@@ -294,13 +294,13 @@ public:
    * (callback, timers, statistics)
    * @param server contains envoy statistics*
    */
-  static void prepareAndSendHystrixStream(HystrixHandlerInfoSharedPtr hystrix_handler_info, Server::Instance& server);
+  static void prepareAndSendHystrixStream(HystrixHandlerInfo* hystrix_handler_info, Server::Instance& server);
   /**
    * Sends a keep alive (ping) message to hystrix dashboard
    * @param hystrix_handler_info is the data which is received in the hystrix handler from the admin filter
    * (callback, timers, statistics)
    */
-  static void sendKeepAlivePing(HystrixHandlerInfoSharedPtr hystrix_handler_info);
+  static void sendKeepAlivePing(HystrixHandlerInfo* hystrix_handler_info);
 };
 
 } // namespace Server

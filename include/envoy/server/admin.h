@@ -23,7 +23,7 @@ namespace Server {
  */
 #define MAKE_ADMIN_HANDLER(X)                                                                      \
   [this](const std::string& url, Http::HeaderMap& response_headers, Buffer::Instance& data,        \
-         Server::HandlerInfoSharedPtr handler_info) -> Http::Code {                                          \
+         Server::HandlerInfo& handler_info) -> Http::Code {                                          \
     return X(url, response_headers, data, handler_info);                                            \
   }
 
@@ -53,9 +53,15 @@ public:
   virtual ~HystrixHandlerInfo(){};
   void Destroy() {
     if (data_timer_)
+    {
       data_timer_->disableTimer();
+      data_timer_.reset();
+    }
     if (ping_timer_)
+    {
       ping_timer_->disableTimer();
+      ping_timer_.reset();
+    }
   }
 
   /**
@@ -86,7 +92,7 @@ public:
    * @return Http::Code the response code.
    */
   typedef std::function<Http::Code(const std::string& url, Http::HeaderMap& response_headers,
-                                   Buffer::Instance& response, Server::HandlerInfoSharedPtr handler_info)>
+                                   Buffer::Instance& response, Server::HandlerInfo& handler_info)>
       HandlerCb;
 
   /**
