@@ -590,24 +590,8 @@ Http::Code AdminImpl::handlerHystrixEventStream(const std::string&,
       Http::Headers::get().AccessControlAllowOriginValue.All);
   response_headers.insertNoChunks().value().setReference("0");
 
-  HystrixHandlerInfo& hystrix_handler_info = dynamic_cast<HystrixHandlerInfo&>(handler_info);
-
-  // start streaming
-  hystrix_handler_info.data_timer_ = hystrix_handler_info.callbacks_->dispatcher().createTimer(
-      [this, &hystrix_handler_info]() -> void {
-        HystrixHandler::prepareAndSendHystrixStream(&hystrix_handler_info, server_);
-      });
-  hystrix_handler_info.data_timer_->enableTimer(
-      std::chrono::milliseconds(Stats::Hystrix::GetRollingWindowIntervalInMs()));
-
-  // start keep alive ping
-  hystrix_handler_info.ping_timer_ =
-      hystrix_handler_info.callbacks_->dispatcher().createTimer([&hystrix_handler_info]() -> void {
-        HystrixHandler::sendKeepAlivePing(&hystrix_handler_info);
-      });
-
-  hystrix_handler_info.ping_timer_->enableTimer(
-      std::chrono::milliseconds(Stats::Hystrix::GetPingIntervalInMs()));
+  Stats::HystrixHandlerInfoImpl& hystrix_handler_info = dynamic_cast<Stats::HystrixHandlerInfoImpl&>(handler_info);
+  Stats::HystrixHandler::HandleEventStream(&hystrix_handler_info,server_);
 
   ENVOY_LOG(debug, "start sending data to hystrix dashboard on port {}",
             hystrix_handler_info.callbacks_->connection()->localAddress()->asString());
@@ -624,11 +608,11 @@ void AdminFilter::onComplete() {
   bool end_stream = true;
 
   if (path.find("/hystrix_event_stream") == std::string::npos) {
-    HandlerInfoPtr temp_handler(new HandlerInfo);
+    HandlerInfoPtr temp_handler(new HandlerInfoImpl);
     handler_info_ = std::move(temp_handler);
     code = parent_.runCallback(path, *header_map, response, *handler_info_);
   } else {
-    HandlerInfoPtr temp_handler(new HystrixHandlerInfo(callbacks_));
+    HandlerInfoPtr temp_handler(new Stats::HystrixHandlerInfoImpl(callbacks_));
     handler_info_ = std::move(temp_handler);
     code = parent_.runCallback(path, *header_map, response, *handler_info_);
     end_stream = false;
@@ -846,72 +830,6 @@ bool AdminImpl::removeHandler(const std::string& prefix) {
     return true;
   }
   return false;
-}
-
-void HystrixHandlerInfo::Destroy() {
-  if (data_timer_) {
-    data_timer_->disableTimer();
-    data_timer_.reset();
-  }
-  if (ping_timer_) {
-    ping_timer_->disableTimer();
-    ping_timer_.reset();
-  }
-}
-
-void HystrixHandler::updateHystrixRollingWindow(HystrixHandlerInfo* hystrix_handler_info,
-                                                Server::Instance& server) {
-  hystrix_handler_info->stats_->incCounter();
-
-  for (const Stats::CounterSharedPtr& counter : server.stats().counters()) {
-    // we save all upstream_rq stats.
-    if (counter->name().find("upstream_rq_") != std::string::npos) {
-      hystrix_handler_info->stats_->pushNewValue(counter->name(), counter->value());
-    }
-  }
-}
-
-void HystrixHandler::prepareAndSendHystrixStream(HystrixHandlerInfo* hystrix_handler_info,
-                                                 Server::Instance& server) {
-  updateHystrixRollingWindow(hystrix_handler_info, server);
-  std::stringstream ss;
-  for (auto& cluster : server.clusterManager().clusters()) {
-    hystrix_handler_info->stats_->getClusterStats(
-        ss, cluster.second.get().info()->name(),
-        cluster.second.get()
-            .info()
-            ->resourceManager(Upstream::ResourcePriority::Default)
-            .pendingRequests()
-            .max(),
-        server.stats()
-            .gauge("cluster." + cluster.second.get().info()->name() + ".membership_total")
-            .value());
-  }
-  Buffer::OwnedImpl data;
-  data.add(ss.str());
-
-  // using write() since we are sending network level
-  // TODO(trabetti): is there an alternative to the const_cast?
-  (const_cast<Network::Connection*>((hystrix_handler_info->callbacks_)->connection()))
-      ->write(data, false);
-
-  // restart timer
-  hystrix_handler_info->data_timer_->enableTimer(
-      std::chrono::milliseconds(Stats::Hystrix::GetRollingWindowIntervalInMs()));
-}
-
-void HystrixHandler::sendKeepAlivePing(HystrixHandlerInfo* hystrix_handler_info) {
-  Buffer::OwnedImpl data;
-  data.add(":\n\n");
-
-  // using write() since we are sending network level
-  // TODO(trabetti): is there an alternative to the const_cast?
-  (const_cast<Network::Connection*>((hystrix_handler_info->callbacks_)->connection()))
-      ->write(data, false);
-
-  // restart timer
-  hystrix_handler_info->ping_timer_->enableTimer(
-      std::chrono::milliseconds(Stats::Hystrix::GetPingIntervalInMs()));
 }
 
 } // namespace Server
