@@ -49,7 +49,7 @@ public:
    */
   static uint64_t GetPingIntervalInMs() { return PING_INTERVAL_IN_MS; }
 
-  void updateRollingWindowMap(Stats::Store& stats, absl::string_view cluster_name);
+  void updateRollingWindowMap(Stats::Store& stats, const std::string& cluster_name);
 
   /**
    * Clear map.
@@ -81,7 +81,7 @@ private:
   void addInfoToStream(absl::string_view key, absl::string_view value, std::stringstream& info);
 
   /**
-   * generate HystrixCommand event stream
+   * generate HystrixCommand event stream.
    */
   void addHystrixCommand(std::stringstream& ss, absl::string_view cluster_name,
                          uint64_t max_concurrent_requests, uint64_t reporting_hosts);
@@ -92,6 +92,11 @@ private:
   void addHystrixThreadPool(std::stringstream& ss, absl::string_view cluster_name, uint64_t queue_size,
                             uint64_t reporting_hosts);
 
+  /**
+   * Building lookup name map for all specific cluster values.
+   */
+  void CreateCounterNameLookupForCluster(const std::string& cluster_name);
+
   RollingStatsMap rolling_stats_map_;
   uint64_t current_index_;
   uint64_t num_of_buckets_;
@@ -99,6 +104,7 @@ private:
   static const uint64_t DEFAULT_NUM_OF_BUCKETS = 10;
   static const uint64_t ROLLING_WINDOW_IN_MS = 10000;
   static const uint64_t PING_INTERVAL_IN_MS = 3000;
+  std::map<std::string,std::map<std::string,std::string> > counter_name_lookup;
 };
 
 typedef std::unique_ptr<Hystrix> HystrixPtr;
